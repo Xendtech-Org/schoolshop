@@ -1252,10 +1252,12 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     logOrder(o, userId, `declined the refund request: "${reason}"`)
     return refundsView()
   }],
-  ["post", "/admin/disputes/:id/refund/", ({ params, userId }) => {
+  ["post", "/admin/disputes/:id/refund/", ({ params, body, userId }) => {
     const d = disputes.get(params.id) ?? raise(notFound())
     if (d.status !== "open") throw new HttpError(409, { detail: "This dispute is already settled." })
-    const open = d.orderIds.map(findOrder).filter((o) => orderExtra(o).issue === "short_delivery")
+    const picked = new Set((body.orderIds as string[] | undefined) ?? [])
+    if (!picked.size || [...picked].some((id) => !d.orderIds.includes(id))) throw new HttpError(400, { orderIds: ["Tick the students the school says are missing a pack."] })
+    const open = d.orderIds.filter((id) => picked.has(id)).map(findOrder)
     const reason = d.kind === "short" ? `Missing from ${d.publisherName}'s delivery to ${d.schoolName}` : `Damaged in ${d.publisherName}'s delivery to ${d.schoolName}`
     const total = open.reduce((t, o) => t + refundItems(o, publisherItems(o, d.publisherName).map((i) => i.id), reason, userId), 0)
     let where = ""
@@ -1288,13 +1290,16 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
       .flatMap((o) => orderExtra(o).payments.map((p) => ({ id: p.id, at: p.at, orderId: o.id, orderNumber: o.number, schoolName: o.schoolName, phone: display(p.phone)!, amountCents: p.amountCents, receipt: p.receipt, status: p.status })))
       .sort((a, b) => b.at.localeCompare(a.at))],
   ["post", "/admin/payouts/release/", ({ body, userId }) => {
-    const ids = (body.ids as string[]) ?? []
-    if (!ids.length) throw new HttpError(400, { ids: ["Choose the payouts to release."] })
+    const rows = (body.payouts as { id: string; reference: string }[] | undefined) ?? []
+    if (!rows.length) throw new HttpError(400, { payouts: ["Choose the payouts to release."] })
+    if (rows.some((r) => !String(r.reference ?? "").trim())) throw new HttpError(400, { payouts: ["Enter the transaction reference for each payout."] })
+    const refs = new Map(rows.map((r) => [r.id, String(r.reference).trim().toUpperCase()]))
+    const ids = rows.map((r) => r.id)
     const blocked = ids.map(findPayout).filter((p) => p.status !== "queued" || accountFor(publisherOf(p.id)).status !== "verified")
     if (blocked.length) throw new HttpError(409, { detail: `Can't release ${blocked.map((p) => p.deliveryNoteNo).join(", ")}: not ready or the payout account isn't verified.` })
     for (const id of ids) {
       const p = findPayout(id)
-      Object.assign(p, { status: "paid", paidAt: stamp(), reference: "QK" + Math.random().toString(36).slice(2, 10).toUpperCase() })
+      Object.assign(p, { status: "paid", paidAt: stamp(), reference: refs.get(id)! })
       logPayout(id, userId, `released ${formatKes(p.netCents)} to ${accountFor(publisherOf(id)).masked} · ${p.reference}`)
     }
     return money()
