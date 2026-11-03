@@ -240,6 +240,20 @@ export const productSchema = z.object({
 })
 export type Product = z.infer<typeof productSchema>
 
+/** A file a publisher attached to a title. Downloaded through the API, never linked directly. */
+export const catalogFileSchema = z.object({
+  id: z.string(),
+  /** document: for SchoolShop's review (e.g. KICD approval letter) · resource: comes with the title (e-book, worksheets) */
+  kind: z.enum(["document", "resource"]),
+  label: z.string(),
+  /** The file name as uploaded. */
+  name: z.string(),
+  sizeBytes: z.number().int().nonnegative(),
+  contentType: z.string(),
+  uploadedAt: isoDateTime,
+})
+export type CatalogFile = z.infer<typeof catalogFileSchema>
+
 export const productDetailSchema = productSchema.extend({
   description: z.string(),
   isbn: z.string().nullable(),
@@ -249,6 +263,8 @@ export const productDetailSchema = productSchema.extend({
   /** A few schools whose published lists include this item, for reassurance. */
   onSchoolLists: z.array(z.object({ slug: z.string(), name: z.string(), town: z.string() })),
   related: z.array(productSchema),
+  /** Downloads that come with the title, available to parents once they've bought it. */
+  resources: z.array(z.object({ id: z.string(), label: z.string(), name: z.string(), sizeBytes: z.number().int().nonnegative() })).default([]),
 })
 export type ProductDetail = z.infer<typeof productDetailSchema>
 
@@ -269,6 +285,9 @@ export const catalogItemSchema = z.object({
   lowStockAt: z.number().int().nonnegative(),
   status: z.enum(["live", "draft"]),
   schoolListCount: z.number().int().nonnegative(),
+  /** The uploaded cover, or null to show a coloured placeholder. */
+  coverUrl: z.url().nullable().default(null),
+  files: z.array(catalogFileSchema).default([]),
   /** New titles wait for SchoolShop to check them before schools can see them. */
   review: z
     .object({ state: z.enum(["pending", "changes_requested", "rejected"]), note: z.string().nullable(), submittedAt: isoDateTime })
@@ -590,6 +609,10 @@ export const studentImportResultSchema = z.object({
 })
 export type StudentImportResult = z.infer<typeof studentImportResultSchema>
 
+/** A CSV price list, checked (dry run) or imported. Same shape as the student import. */
+export const catalogImportResultSchema = studentImportResultSchema
+export type CatalogImportResult = StudentImportResult
+
 export const staffMemberSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -744,6 +767,9 @@ export const catalogSubmissionSchema = z.object({
   /** Checked automatically when the title comes in. */
   checks: z.array(z.object({ id: z.string(), label: z.string(), result: z.enum(["pass", "warn", "fail"]), detail: z.string() })),
   similar: z.array(z.object({ title: z.string(), publisherName: z.string(), priceCents: cents })),
+  /** The title's cover and attached files, for the reviewer to check. */
+  coverUrl: z.url().nullable().default(null),
+  files: z.array(catalogFileSchema).default([]),
   history: z.array(z.object({ id: z.string(), at: isoDateTime, actor: z.string(), text: z.string() })),
 })
 export type CatalogSubmission = z.infer<typeof catalogSubmissionSchema>

@@ -390,6 +390,31 @@ export const useSaveCatalogItem = () => {
   })
 }
 
+/** Covers, files and price lists. Each returns the updated title (or import result) and refreshes the catalog. */
+export const useCatalogUploads = () => {
+  const qc = useQueryClient()
+  const refresh = () => qc.invalidateQueries({ queryKey: queryKeys.catalog })
+  return {
+    uploadCover: useMutation({ mutationFn: ({ id, file }: { id: string; file: File }) => endpoints.uploadCover(id, file), onSuccess: refresh }),
+    removeCover: useMutation({ mutationFn: (id: string) => endpoints.removeCover(id), onSuccess: refresh }),
+    uploadFile: useMutation({
+      mutationFn: ({ id, ...input }: { id: string; kind: endpoints.CatalogFileKind; label: string; file: File }) => endpoints.uploadCatalogFile(id, input),
+      onSuccess: refresh,
+    }),
+    removeFile: useMutation({ mutationFn: ({ id, fileId }: { id: string; fileId: string }) => endpoints.removeCatalogFile(id, fileId), onSuccess: refresh }),
+  }
+}
+
+export const useImportPriceList = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ file, dryRun }: { file: File; dryRun: boolean }) => endpoints.importPriceList(file, dryRun),
+    onSuccess: (_, { dryRun }) => {
+      if (!dryRun) void qc.invalidateQueries({ queryKey: queryKeys.catalog })
+    },
+  })
+}
+
 export const useDispatchBatch = () => {
   const qc = useQueryClient()
   return useMutation({

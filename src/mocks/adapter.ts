@@ -1,6 +1,6 @@
 import { AxiosError, type AxiosAdapter, type AxiosResponse, type InternalAxiosRequestConfig } from "axios"
 
-import type { AdminOrder, AdminOrg, AdminPayout, AdminRefunds, AuditCategory, AuditEntry, CatalogSubmission, PlatformSettings, Collection, Dispute, RefundRecord, Booklist, CatalogItem, CollectionRow, Order, Payment, PublisherPayouts, SchoolOrderDetail, StudentOrderRow } from "@/lib/api/schemas"
+import type { AdminOrder, AdminOrg, AdminPayout, AdminRefunds, AuditCategory, AuditEntry, CatalogFile, CatalogSubmission, PlatformSettings, Collection, Dispute, RefundRecord, Booklist, CatalogItem, CollectionRow, Order, Payment, PublisherPayouts, SchoolOrderDetail, StudentOrderRow } from "@/lib/api/schemas"
 import { ownerRole, permissionsFor, roleDef, type OrgType } from "@/lib/access"
 import { formatKes, normaliseKenyanPhone } from "@/lib/format"
 import * as db from "@/mocks/fixtures"
@@ -345,6 +345,30 @@ function logOrg(org: AdminOrg, userId: string | null, text: string) {
 
 /* ── Catalog review: publishers' new titles and price changes wait for a check. ── */
 
+/** Files publishers attached in this session, for downloads. */
+const mockFiles = new Map<string, File>()
+
+/** Rows of a CSV file, with quoted fields ("A4 books, 96 pg") kept whole. */
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = []
+  let row: string[] = [], field = "", quoted = false
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (quoted) {
+      if (ch === '"' && text[i + 1] === '"') { field += '"'; i++ }
+      else if (ch === '"') quoted = false
+      else field += ch
+    } else if (ch === '"') quoted = true
+    else if (ch === ",") { row.push(field); field = "" }
+    else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && text[i + 1] === "\n") i++
+      row.push(field); rows.push(row); row = []; field = ""
+    } else field += ch
+  }
+  if (field || row.length) { row.push(field); rows.push(row) }
+  return rows.map((r) => r.map((v) => v.replace(/^\uFEFF/, "")))
+}
+
 const gradeBandOf = (label: string): CatalogItem["gradeBand"] => {
   if (/^PP/i.test(label)) return "pp"
   const n = Number(label.match(/\d+/)?.[0])
@@ -358,7 +382,7 @@ const isbnValid = (isbn: string) => {
   const sum = [...d.slice(0, 12)].reduce((t, c, i) => t + Number(c) * (i % 2 ? 3 : 1), 0)
   return (10 - (sum % 10)) % 10 === Number(d[12])
 }
-type SubmissionRecord = Omit<CatalogSubmission, "checks" | "similar"> & { catalogId?: string }
+type SubmissionRecord = Omit<CatalogSubmission, "checks" | "similar" | "coverUrl" | "files"> & { catalogId?: string }
 const submissions = new Map<string, SubmissionRecord>(db.catalogSubmissionSeeds.map((x) => {
   const at = new Date(Date.now() - x.hoursAgo * 3_600_000).toISOString().replace(/\.\d+Z$/, "+00:00")
   const decided = x.status && x.status !== "pending"
@@ -406,7 +430,8 @@ function submissionView(x: SubmissionRecord): CatalogSubmission {
   const org = adminOrgs.get(x.publisherId)
   checks.push({ id: "publisher", label: "Publisher", result: org?.status === "live" ? "pass" : "fail", detail: org?.status === "live" ? `${x.publisherName} is verified.` : `${x.publisherName} isn't verified or is paused.` })
   const { catalogId: _c, ...rest } = x
-  return { ...rest, checks, similar }
+  const linked = x.catalogId ? catalog.get(x.catalogId) : undefined
+  return { ...rest, checks, similar, coverUrl: linked?.coverUrl ?? null, files: linked?.files ?? [] }
 }
 /* ── Platform settings ── */
 
@@ -1485,10 +1510,86 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     payouts.account = { method, accountName: String(body.accountName), masked, status: "pending_verification" }
     return payouts.account
   }],
+  ["post", "/publisher/catalog/import/", ({ body }) => {
+    const file = body.file as File | undefined
+    if (!file) throw new HttpError(400, { file: ["Choose a file to upload."] })
+    if (!/\.csv$/i.test(file.name)) throw new HttpError(400, { file: ["Upload a CSV file. In Excel, use Save As › CSV."] })
+    const [header, ...lines] = parseCsv(String(body.fileText ?? ""))
+    const cols = (header ?? []).map((c) => c.trim().toLowerCase())
+    if (!cols.includes("title") || !cols.includes("price")) throw new HttpError(400, { file: ["The first row needs the column names: title, subject, grade, isbn, price, stock."] })
+    const taken = new Set([...catalog.values()].map((c) => (c.isbn ?? "").replace(/\D/g, "")).filter(Boolean))
+    const errors: { line: number; message: string }[] = []
+    const ready: CatalogItem[] = []
+    lines.forEach((row, i) => {
+      const at = (name: string) => (row[cols.indexOf(name)] ?? "").trim()
+      if (!row.some((v) => v.trim())) return
+      const line = i + 2
+      const price = Number(at("price").replace(/,/g, ""))
+      const isbn = at("isbn")
+      const before = errors.length
+      if (at("title").length < 3) errors.push({ line, message: "Enter the title as it appears on the cover" })
+      if (!(price > 0)) errors.push({ line, message: "Enter a price in whole shillings" })
+      if (!/^\d*$/.test(at("stock"))) errors.push({ line, message: "Enter a whole number, 0 or more" })
+      if (isbn && !/^(97[89]\d{10}|\d{9}[\dX])$/.test(isbn.replace(/[-\s]/g, ""))) errors.push({ line, message: "Enter a 13-digit ISBN, like 978-9966-36-412-8" })
+      else if (isbn && taken.has(isbn.replace(/\D/g, ""))) errors.push({ line, message: "A title with this ISBN is already in your catalog or earlier in this file." })
+      if (isbn) taken.add(isbn.replace(/\D/g, ""))
+      if (errors.length > before) return
+      const gradeLabel = at("grade") || "All grades"
+      ready.push({
+        id: `cat-${++catalogSeq}`, title: at("title"), subject: at("subject") || "General", gradeLabel, gradeBand: gradeBandOf(gradeLabel), isbn: isbn || null,
+        format: at("format") || "Paperback, A4", priceCents: Math.round(price * 100), stock: Number(at("stock") || 0), lowStockAt: Number(at("low_stock") || 100),
+        status: "draft", schoolListCount: 0, coverUrl: null, files: [], review: null,
+      })
+    })
+    if (!ready.length && !errors.length) throw new HttpError(400, { file: ["There are no titles in this file."] })
+    const dryRun = String(body.dryRun) !== "false"
+    if (!dryRun) for (const item of ready) catalog.set(item.id, item)
+    return { valid: ready.length, created: dryRun ? 0 : ready.length, errors }
+  }],
+  ["post", "/publisher/catalog/:id/cover/", ({ params, body }) => {
+    const item = catalog.get(params.id) ?? raise(notFound())
+    const file = body.file as File | undefined
+    if (!file) throw new HttpError(400, { file: ["Choose a file to upload."] })
+    if (!/\.(jpe?g|png|webp)$/i.test(file.name)) throw new HttpError(400, { file: ["Upload a JPG, PNG or WebP image."] })
+    if (file.size > 5 * 1024 * 1024) throw new HttpError(400, { file: ["Keep it under 5 MB."] })
+    item.coverUrl = URL.createObjectURL(file)
+    return item
+  }],
+  ["delete", "/publisher/catalog/:id/cover/", ({ params }) => {
+    const item = catalog.get(params.id) ?? raise(notFound())
+    item.coverUrl = null
+    return item
+  }],
+  ["post", "/publisher/catalog/:id/files/", ({ params, body }) => {
+    const item = catalog.get(params.id) ?? raise(notFound())
+    const kind = body.kind as CatalogFile["kind"]
+    const label = String(body.label ?? "").trim()
+    const file = body.file as File | undefined
+    if (kind !== "document" && kind !== "resource") throw new HttpError(400, { kind: ["Choose whether it's for SchoolShop's review or comes with the title."] })
+    if (label.length < 2) throw new HttpError(400, { label: [`Name the file, like ${kind === "document" ? "KICD approval letter" : "Teacher's guide"}.`] })
+    if (!file) throw new HttpError(400, { file: ["Choose a file to upload."] })
+    const allowed = kind === "document" ? /\.(pdf|jpe?g|png)$/i : /\.(pdf|epub|zip|docx|xlsx|pptx|mp3|mp4)$/i
+    if (!allowed.test(file.name)) throw new HttpError(400, { file: [kind === "document" ? "Upload a PDF, JPG or PNG." : "Upload a PDF, EPUB, ZIP, Word, Excel, PowerPoint, MP3 or MP4 file."] })
+    const limit = kind === "document" ? 10 : 50
+    if (file.size > limit * 1024 * 1024) throw new HttpError(400, { file: [`Keep it under ${limit} MB.`] })
+    if (item.files.filter((f) => f.kind === kind).length >= 10) throw new HttpError(400, { file: ["A title can have up to 10 of these. Remove one first."] })
+    const id = `file-${Date.now()}`
+    mockFiles.set(id, file)
+    item.files.push({ id, kind, label, name: file.name, sizeBytes: file.size, contentType: file.type || "application/octet-stream", uploadedAt: stamp() })
+    return item
+  }],
+  ["delete", "/publisher/catalog/:id/files/:fileId/", ({ params }) => {
+    const item = catalog.get(params.id) ?? raise(notFound())
+    if (!item.files.some((f) => f.id === params.fileId)) throw notFound()
+    item.files = item.files.filter((f) => f.id !== params.fileId)
+    mockFiles.delete(params.fileId)
+    return item
+  }],
+  ["get", "/catalog/files/:id/", ({ params }) => mockFiles.get(params.id) ?? raise(notFound())],
   ["post", "/publisher/catalog/", ({ body }) => {
     const isbn = body.isbn ? String(body.isbn) : null
     if (isbn && [...catalog.values()].some((c) => c.isbn === isbn)) throw new HttpError(400, { isbn: ["A title with this ISBN is already in your catalog."] })
-    const item: CatalogItem = { ...(body as Omit<CatalogItem, "id" | "schoolListCount">), isbn, id: `cat-${++catalogSeq}`, schoolListCount: 0, review: null }
+    const item: CatalogItem = { ...(body as Omit<CatalogItem, "id" | "schoolListCount" | "coverUrl" | "files">), isbn, id: `cat-${++catalogSeq}`, schoolListCount: 0, coverUrl: null, files: [], review: null }
     // A title the publisher wants schools to see waits for SchoolShop to check it first.
     if (item.status === "live") {
       const at = new Date().toISOString().replace(/\.\d+Z$/, "+00:00")
@@ -1557,6 +1658,16 @@ function match(pattern: string, path: string) {
 }
 
 /** Mock mode only: a code that works right now in this class, so the demo can be tried. */
+/** Multipart uploads as a plain object. CSV files also come as text, since handlers are synchronous. */
+async function formBody(form: FormData) {
+  const body: Record<string, unknown> = {}
+  for (const [key, value] of form.entries()) {
+    body[key] = value
+    if (value instanceof File && /\.csv$/i.test(value.name)) body[`${key}Text`] = await value.text()
+  }
+  return body
+}
+
 export function demoCollectionCode(className: string) {
   const order = [...schoolOrders.values()].find((o) => o.className === className && o.status === "at_school")
   return order?.collectionCode ? { studentName: order.studentName, code: order.collectionCode } : null
@@ -1568,7 +1679,7 @@ export const mockAdapter: AxiosAdapter = async (config: InternalAxiosRequestConf
   const method = (config.method ?? "get").toLowerCase()
   const query: Record<string, string> = Object.fromEntries(url.searchParams)
   for (const [key, value] of Object.entries(config.params ?? {})) if (value != null) query[key] = String(value)
-  const body = typeof config.data === "string" && config.data ? JSON.parse(config.data) : (config.data ?? {})
+  const body = config.data instanceof FormData ? await formBody(config.data) : typeof config.data === "string" && config.data ? JSON.parse(config.data) : (config.data ?? {})
 
   const respond = (status: number, data: unknown): AxiosResponse => ({ data, status, statusText: String(status), headers: {}, config })
 

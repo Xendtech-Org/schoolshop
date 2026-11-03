@@ -17,6 +17,7 @@ import {
   adminOverviewSchema,
   authTokensSchema,
   booklistSchema,
+  catalogImportResultSchema,
   catalogItemSchema,
   childSchema,
   codeSentSchema,
@@ -213,7 +214,7 @@ export const remindParents = (studentIds: string[]) =>
   post("/school/orders/remind/", remindResultSchema, { studentIds })
 
 // Publisher
-export type CatalogItemInput = Omit<z.infer<typeof catalogItemSchema>, "id" | "schoolListCount">
+export type CatalogItemInput = Omit<z.infer<typeof catalogItemSchema>, "id" | "schoolListCount" | "coverUrl" | "files" | "review">
 export const listCatalog = () => get("/publisher/catalog/", z.array(catalogItemSchema))
 export const createCatalogItem = (input: CatalogItemInput) =>
   post("/publisher/catalog/", catalogItemSchema, input)
@@ -221,6 +222,40 @@ export const updateCatalogItem = async (id: string, input: Partial<CatalogItemIn
   const { data } = await api.patch(`/publisher/catalog/${id}/`, input)
   return catalogItemSchema.parse(data)
 }
+
+async function upload<T extends z.ZodType>(url: string, schema: T, fields: Record<string, string | Blob>) {
+  const form = new FormData()
+  for (const [key, value] of Object.entries(fields)) form.append(key, value)
+  const { data } = await api.post(url, form)
+  return schema.parse(data) as z.infer<T>
+}
+
+/** JPG, PNG or WebP, up to 5 MB. Replaces any earlier cover. */
+export const uploadCover = (id: string, file: File) => upload(`/publisher/catalog/${id}/cover/`, catalogItemSchema, { file })
+export const removeCover = async (id: string) => {
+  const { data } = await api.delete(`/publisher/catalog/${id}/cover/`)
+  return catalogItemSchema.parse(data)
+}
+export type CatalogFileKind = "document" | "resource"
+/** document: PDF, JPG or PNG up to 10 MB, for SchoolShop's review. resource: up to 50 MB, comes with the title. */
+export const uploadCatalogFile = (id: string, input: { kind: CatalogFileKind; label: string; file: File }) =>
+  upload(`/publisher/catalog/${id}/files/`, catalogItemSchema, input)
+export const removeCatalogFile = async (id: string, fileId: string) => {
+  const { data } = await api.delete(`/publisher/catalog/${id}/files/${fileId}/`)
+  return catalogItemSchema.parse(data)
+}
+/** Files aren't public, so they're fetched with the signed-in person's token and saved from memory. */
+export async function downloadCatalogFile(fileId: string, name: string) {
+  const { data } = await api.get(`/catalog/files/${fileId}/`, { responseType: "blob" })
+  const href = URL.createObjectURL(data as Blob)
+  const a = Object.assign(document.createElement("a"), { href, download: name })
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(href), 1_000)
+}
+/** A CSV price list. dryRun checks every row and saves nothing; otherwise the good rows are added as drafts. */
+export const importPriceList = (file: File, dryRun: boolean) =>
+  upload("/publisher/catalog/import/", catalogImportResultSchema, { file, dryRun: String(dryRun) })
+
 export const listPublisherBatches = () => get("/publisher/batches/", z.array(schoolBatchSchema))
 export type DispatchInput = {
   carrier: string
