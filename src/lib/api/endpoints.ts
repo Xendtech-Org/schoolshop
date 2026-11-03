@@ -15,6 +15,7 @@ import {
   adminOrgSchema,
   adminOrgSummarySchema,
   adminOverviewSchema,
+  applicationDocumentsSchema,
   authTokensSchema,
   booklistSchema,
   catalogDeleteResultSchema,
@@ -97,9 +98,30 @@ export type OrgApplicationInput = {
   phone: string
   password: string
 }
-/** School or publisher sign-up. Lands in the platform admin verification queue. */
-export const applyForOrganisation = (input: OrgApplicationInput) =>
-  post("/organisations/applications/", orgApplicationSchema, input)
+/**
+ * School or publisher sign-up. Lands in the platform admin verification queue.
+ * Documents (optional) go with it as files, keyed like "kra_pin" (see lib/orgDocuments).
+ */
+export async function applyForOrganisation(input: OrgApplicationInput, documents: Partial<Record<string, File>> = {}) {
+  const files = Object.entries(documents).filter((e): e is [string, File] => !!e[1])
+  if (!files.length) return post("/organisations/applications/", orgApplicationSchema, input)
+  const form = new FormData()
+  for (const [key, value] of Object.entries(input)) form.append(key, String(value))
+  for (const [key, file] of files) form.append(`documents.${key}`, file)
+  const { data } = await api.post("/organisations/applications/", form)
+  return orgApplicationSchema.parse(data)
+}
+/** The applicant's documents page, opened from the link SchoolShop texts them. No sign-in. */
+export const getApplicationDocuments = (token: string) =>
+  get("/organisations/applications/documents/", applicationDocumentsSchema, { token })
+export async function sendApplicationDocument(token: string, key: string, file: File) {
+  const form = new FormData()
+  form.append("token", token)
+  form.append("key", key)
+  form.append("file", file)
+  const { data } = await api.post("/organisations/applications/documents/", form)
+  return applicationDocumentsSchema.parse(data)
+}
 export const getMe = () => get("/me/", userSchema)
 
 // Public
@@ -349,6 +371,13 @@ export const decideOrg = (id: string, decision: OrgDecision, note: string) =>
   post(`/admin/organisations/${id}/${decision}/`, adminOrgSchema, { note })
 export const setOrgCheck = (id: string, checkId: string, state: "verified" | "failed") =>
   post(`/admin/organisations/${id}/checks/${checkId}/`, adminOrgSchema, { state })
+/** An applicant's document, for SchoolShop staff. Fetched with the token, then saved. */
+export async function downloadOrgDocument(orgId: string, checkId: string, name: string) {
+  const { data } = await api.get(`/admin/organisations/${orgId}/checks/${checkId}/file/`, { responseType: "blob" })
+  const href = URL.createObjectURL(data as Blob)
+  Object.assign(document.createElement("a"), { href, download: name }).click()
+  setTimeout(() => URL.revokeObjectURL(href), 1_000)
+}
 export const inviteOrg = (input: { type: "school" | "publisher"; name: string; contact: string }) =>
   post("/admin/organisations/invite/", z.object({ sent: z.boolean() }), input)
 

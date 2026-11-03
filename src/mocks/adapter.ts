@@ -337,6 +337,14 @@ function logPayout(id: string, userId: string | null, text: string) {
 }
 const money = () => ({ termName: "Term 1, 2027", commissionRate: platform.commission.defaultRate, payouts: adminPayouts() })
 
+/** The API's key for each check (apps/accounts/organisations.py). */
+const checkKey = (label: string) =>
+  ({ "Ministry of Education registration": "registration", "Certificate of incorporation": "registration", "KRA PIN certificate": "kra_pin", "Head teacher's phone verified": "phone", "Class list": "class_list", "Payout account": "payout_account", "Catalog sample": "catalog_sample" })[label] ?? label
+const documentsView = (org: AdminOrg) => ({
+  orgName: org.name, orgType: org.type, status: org.status, open: org.status === "pending" || org.status === "info_requested",
+  documents: [...org.checks].sort((a, b) => a.label.localeCompare(b.label)).map((c) => ({ key: checkKey(c.label), label: c.label, state: c.state, fileName: c.fileName, canUpload: checkKey(c.label) !== "phone" && c.state !== "verified" })),
+})
+
 function logOrg(org: AdminOrg, userId: string | null, text: string) {
   const actor = usersById().find((u) => u.id === userId)?.name ?? "SchoolShop"
   org.history.unshift({ id: `h-${Date.now()}-${org.history.length}`, at: new Date().toISOString().replace("Z", "+00:00"), actor, text })
@@ -806,6 +814,22 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     if (body.currentPassword === body.newPassword) throw new HttpError(400, { newPassword: ["Choose a password you haven't used before."] })
     passwords.set(user.phone, String(body.newPassword))
     return { changed: true }
+  }],
+  // In the mock, the texted link's token is simply the organisation's id (e.g. app-mwangaza).
+  ["get", "/organisations/applications/documents/", ({ query }) => documentsView(adminOrgs.get(query.token ?? "") ?? raise(notFound()))],
+  ["post", "/organisations/applications/documents/", ({ body }) => {
+    const org = adminOrgs.get(String(body.token ?? "")) ?? raise(notFound())
+    if (org.status !== "pending" && org.status !== "info_requested") throw new HttpError(409, { detail: "SchoolShop has already decided on this application." })
+    const check = org.checks.find((c) => checkKey(c.label) === body.key && checkKey(c.label) !== "phone") ?? raise(new HttpError(400, { key: ["Choose which document this is."] }))
+    if (check.state === "verified") throw new HttpError(409, { detail: "SchoolShop has already checked this one." })
+    const file = body.file as File | undefined
+    if (!file) throw new HttpError(400, { file: ["Choose a file to upload."] })
+    if (!/\.(pdf|jpe?g|png|csv|xlsx)$/i.test(file.name)) throw new HttpError(400, { file: ["Upload a PDF, a photo (JPG or PNG), or a CSV or Excel file."] })
+    if (file.size > 10 * 1024 * 1024) throw new HttpError(400, { file: ["Keep it under 10 MB."] })
+    Object.assign(check, { state: "uploaded", fileName: file.name, uploadedAt: stamp() })
+    org.openChecks = org.checks.filter((c) => c.state !== "verified").length
+    org.history.unshift({ id: `h-${Date.now()}`, at: stamp(), actor: org.contactName, text: `sent ${check.label}` })
+    return documentsView(org)
   }],
   ["post", "/organisations/applications/", ({ body }) => {
     const phone = String(body.phone ?? "")

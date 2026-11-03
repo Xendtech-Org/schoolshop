@@ -63,6 +63,19 @@ export const orgApplicationSchema = z.object({
 })
 export type OrgApplication = z.infer<typeof orgApplicationSchema>
 
+/** The applicant's own view of their documents, from the link SchoolShop texts them. */
+export const applicationDocumentsSchema = z.object({
+  orgName: z.string(),
+  orgType: z.enum(["school", "publisher"]),
+  status: z.enum(["pending", "info_requested", "live", "suspended", "rejected"]),
+  /** False once SchoolShop has decided: nothing more to send. */
+  open: z.boolean(),
+  documents: z.array(
+    z.object({ key: z.string(), label: z.string(), state: z.enum(["verified", "uploaded", "missing", "failed"]), fileName: z.string().nullable(), canUpload: z.boolean() })
+  ),
+})
+export type ApplicationDocuments = z.infer<typeof applicationDocumentsSchema>
+
 export const schoolSchema = z.object({
   id: z.string(),
   slug: z.string(),
@@ -845,6 +858,8 @@ export const orgCheckSchema = z.object({
   state: z.enum(["verified", "uploaded", "missing", "failed"]),
   fileName: z.string().nullable(),
   uploadedAt: isoDateTime.nullable(),
+  /** The applicant sent a file for this check, which staff can download. */
+  hasFile: z.boolean().default(false),
 })
 export type OrgCheck = z.infer<typeof orgCheckSchema>
 

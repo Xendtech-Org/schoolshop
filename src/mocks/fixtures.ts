@@ -868,8 +868,8 @@ export const refundLogSeed = Array.from({ length: 6 }, (_, i) => ({
  */
 export const adminOrgs: AdminOrg[] = (() => {
   const day = (d: number, h = 9) => new Date(Date.now() - d * 86_400_000 - (h % 6) * 3_600_000).toISOString().replace(/\.\d+Z$/, "+00:00")
-  const verified = (label: string, file: string, d = 120): AdminOrg["checks"][number] => ({ id: label.toLowerCase().replace(/[^a-z]+/g, "-"), label, state: "verified", fileName: file, uploadedAt: day(d) })
-  const check = (label: string, state: AdminOrg["checks"][number]["state"], file: string | null, d = 2): AdminOrg["checks"][number] => ({ id: label.toLowerCase().replace(/[^a-z]+/g, "-"), label, state, fileName: state === "missing" ? null : file, uploadedAt: state === "missing" ? null : day(d) })
+  const verified = (label: string, file: string, d = 120): AdminOrg["checks"][number] => ({ id: label.toLowerCase().replace(/[^a-z]+/g, "-"), label, state: "verified", fileName: file, uploadedAt: day(d), hasFile: false })
+  const check = (label: string, state: AdminOrg["checks"][number]["state"], file: string | null, d = 2): AdminOrg["checks"][number] => ({ id: label.toLowerCase().replace(/[^a-z]+/g, "-"), label, state, fileName: state === "missing" ? null : file, uploadedAt: state === "missing" ? null : day(d), hasFile: false })
   const schoolChecks = (name: string, d = 120) => [
     verified("Ministry of Education registration", `${name} MOE certificate.pdf`, d),
     verified("KRA PIN certificate", "KRA PIN.pdf", d),
