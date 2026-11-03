@@ -6,6 +6,7 @@ import {
   accountSchema,
   adminMoneySchema,
   adminOrderSchema,
+  adminRefundsSchema,
   collectionSchema,
   adminOrderSummarySchema,
   adminOrgSchema,
@@ -262,6 +263,14 @@ export const changePassword = (input: { currentPassword: string; newPassword: st
 
 // Platform admin
 export const getAdminOverview = () => get("/admin/overview/", adminOverviewSchema)
+export const getAdminRefunds = () => get("/admin/refunds/", adminRefundsSchema)
+/** Pays back each order's requested items to the M-Pesa number that paid. */
+export const approveRefunds = (orderIds: string[]) => post("/admin/refunds/approve/", adminRefundsSchema, { orderIds })
+export const declineRefund = (orderId: string, reason: string) => post(`/admin/refunds/${orderId}/decline/`, adminRefundsSchema, { reason })
+/** Refund every affected parent; the amount comes off the publisher's payout. */
+export const settleDisputeByRefund = (id: string) => post(`/admin/disputes/${id}/refund/`, adminRefundsSchema, {})
+/** The publisher sent the missing packs: close the dispute and free the payout. */
+export const settleDisputeByReplacement = (id: string, note: string) => post(`/admin/disputes/${id}/replace/`, adminRefundsSchema, { note })
 export const getAdminMoney = () => get("/admin/money/", adminMoneySchema)
 export const listCollections = () => get("/admin/collections/", z.array(collectionSchema))
 /** Sends the money. Only approved payouts to a verified account go. */

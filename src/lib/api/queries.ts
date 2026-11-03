@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import * as endpoints from "@/lib/api/endpoints"
-import type { Account, AdminMoney, AdminOrder, AdminOrg, CollectionRow, PublisherSettings, SchoolSettings, StaffDirectory } from "@/lib/api/schemas"
+import type { Account, AdminMoney, AdminRefunds, AdminOrder, AdminOrg, CollectionRow, PublisherSettings, SchoolSettings, StaffDirectory } from "@/lib/api/schemas"
 import { useAuthStore } from "@/stores/auth"
 
 export const queryKeys = {
@@ -27,6 +27,7 @@ export const queryKeys = {
   adminOrgs: ["admin-orgs"] as const,
   adminOrders: ["admin-orders"] as const,
   adminMoney: ["admin-money"] as const,
+  adminRefunds: ["admin-refunds"] as const,
   collections: ["admin-collections"] as const,
   staff: (scope: string) => ["staff", scope] as const,
   schoolOrder: (id: string) => ["school-orders", id] as const,
@@ -205,6 +206,20 @@ export function useAccountMutation<V>(fn: (vars: V) => Promise<Account>) {
 }
 
 export const useRequestDeletion = () => useMutation({ mutationFn: endpoints.requestAccountDeletion })
+
+export const useAdminRefunds = () => useQuery({ queryKey: queryKeys.adminRefunds, queryFn: endpoints.getAdminRefunds })
+
+/** Refunds touch orders, payouts and the overview, so everything money-related refreshes. */
+export function useRefundsMutation<V>(fn: (vars: V) => Promise<AdminRefunds>) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: (data) => {
+      qc.setQueryData(queryKeys.adminRefunds, data)
+      return Promise.all([queryKeys.adminOrders, queryKeys.adminMoney, queryKeys.adminOverview, queryKeys.payouts].map((queryKey) => qc.invalidateQueries({ queryKey })))
+    },
+  })
+}
 
 export const useAdminMoney = () => useQuery({ queryKey: queryKeys.adminMoney, queryFn: endpoints.getAdminMoney })
 export const useCollections = () => useQuery({ queryKey: queryKeys.collections, queryFn: endpoints.listCollections })
