@@ -1,5 +1,5 @@
 import { Link, useParams } from "react-router"
-import { BadgeCheck, ChevronRight, Minus, Plus, School, Truck } from "lucide-react"
+import { BadgeCheck, ChevronRight, Download, Minus, Plus, School, Truck } from "lucide-react"
 
 import { BookCover, ProductCard } from "@/components/common/ProductCard"
 import { QueryBoundary } from "@/components/common/QueryBoundary"
@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useProduct } from "@/lib/api/queries"
 import type { ProductDetail } from "@/lib/api/schemas"
-import { formatKes } from "@/lib/format"
+import { formatBytes, formatKes } from "@/lib/format"
 import { useCartStore } from "@/stores/cart"
 
 const bandNames: Record<ProductDetail["gradeBand"], string> = {
@@ -163,6 +163,22 @@ function ProductDetailView({ product: p }: { product: ProductDetail }) {
               ))}
             </dl>
           </section>
+
+          {p.resources.length > 0 && (
+            <section className="flex flex-col gap-3" aria-labelledby="resources">
+              <h2 id="resources" className="text-xl font-semibold">Comes with downloads</h2>
+              <ul className="divide-y rounded-2xl border">
+                {p.resources.map((r) => (
+                  <li key={r.id} className="flex items-center gap-3 px-4 py-3 text-[15px]">
+                    <Download className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+                    <span className="min-w-0 grow font-medium">{r.label}</span>
+                    <span className="shrink-0 text-sm text-muted-foreground">{formatBytes(r.sizeBytes)}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-sm text-muted-foreground">You can download these from your order once you've paid.</p>
+            </section>
+          )}
 
           {p.onSchoolLists.length > 0 && (
             <section className="flex flex-col gap-3" aria-labelledby="lists">
