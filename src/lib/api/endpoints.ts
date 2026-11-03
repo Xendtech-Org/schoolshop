@@ -7,6 +7,8 @@ import {
   adminMoneySchema,
   adminOrderSchema,
   adminRefundsSchema,
+  auditEntrySchema,
+  catalogSubmissionSchema,
   collectionSchema,
   adminOrderSummarySchema,
   adminOrgSchema,
@@ -263,6 +265,12 @@ export const changePassword = (input: { currentPassword: string; newPassword: st
 
 // Platform admin
 export const getAdminOverview = () => get("/admin/overview/", adminOverviewSchema)
+export const listCatalogSubmissions = () => get("/admin/catalog/", z.array(catalogSubmissionSchema))
+export type CatalogDecision = "approve" | "request-changes" | "reject"
+/** Approving puts the title (or new price) in front of schools; the publisher hears either way. */
+export const decideSubmission = (id: string, decision: CatalogDecision, note: string) =>
+  post(`/admin/catalog/${id}/${decision}/`, z.array(catalogSubmissionSchema), { note })
+export const listAudit = () => get("/admin/audit/", z.array(auditEntrySchema))
 export const getAdminRefunds = () => get("/admin/refunds/", adminRefundsSchema)
 /** Pays back each order's requested items to the M-Pesa number that paid. */
 export const approveRefunds = (orderIds: string[]) => post("/admin/refunds/approve/", adminRefundsSchema, { orderIds })
