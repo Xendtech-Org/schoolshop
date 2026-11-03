@@ -1,12 +1,13 @@
 import { z } from "zod"
 
 import { api } from "@/lib/api/client"
-import type { PublisherSettings, SchoolSettings } from "@/lib/api/schemas"
+import type { PlatformSettings, PublisherSettings, SchoolSettings, SettingsSection } from "@/lib/api/schemas"
 import {
   accountSchema,
   adminMoneySchema,
   adminOrderSchema,
   adminRefundsSchema,
+  platformSettingsSchema,
   auditEntrySchema,
   catalogSubmissionSchema,
   collectionSchema,
@@ -265,6 +266,12 @@ export const changePassword = (input: { currentPassword: string; newPassword: st
 
 // Platform admin
 export const getAdminOverview = () => get("/admin/overview/", adminOverviewSchema)
+export const getPlatformSettings = () => get("/admin/settings/", platformSettingsSchema)
+/** Saves one section. Every change is written to the audit log. */
+export async function savePlatformSettings<K extends SettingsSection>(section: K, value: PlatformSettings[K]) {
+  const { data } = await api.put(`/admin/settings/${section}/`, value)
+  return platformSettingsSchema.parse(data)
+}
 export const listCatalogSubmissions = () => get("/admin/catalog/", z.array(catalogSubmissionSchema))
 export type CatalogDecision = "approve" | "request-changes" | "reject"
 /** Approving puts the title (or new price) in front of schools; the publisher hears either way. */

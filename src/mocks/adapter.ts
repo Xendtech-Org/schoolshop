@@ -1,8 +1,8 @@
 import { AxiosError, type AxiosAdapter, type AxiosResponse, type InternalAxiosRequestConfig } from "axios"
 
-import type { AdminOrder, AdminOrg, AdminPayout, AdminRefunds, AuditCategory, AuditEntry, CatalogSubmission, Collection, Dispute, RefundRecord, Booklist, CatalogItem, CollectionRow, Order, Payment, PublisherPayouts, SchoolOrderDetail, StudentOrderRow } from "@/lib/api/schemas"
+import type { AdminOrder, AdminOrg, AdminPayout, AdminRefunds, AuditCategory, AuditEntry, CatalogSubmission, PlatformSettings, Collection, Dispute, RefundRecord, Booklist, CatalogItem, CollectionRow, Order, Payment, PublisherPayouts, SchoolOrderDetail, StudentOrderRow } from "@/lib/api/schemas"
 import { ownerRole, permissionsFor, roleDef, type OrgType } from "@/lib/access"
-import { formatKes } from "@/lib/format"
+import { formatKes, normaliseKenyanPhone } from "@/lib/format"
 import * as db from "@/mocks/fixtures"
 
 /*
@@ -335,7 +335,7 @@ function logPayout(id: string, userId: string | null, text: string) {
   const publisher = publisherOf(id) === "pub-longhorn" ? "Longhorn Publishers" : publisherAccounts[publisherOf(id)].name
   audit(userId, "money", text, { label: `${publisher} · ${p.schoolName}`, href: `/admin/payments?show=all&payout=${id}` })
 }
-const money = () => ({ termName: "Term 1, 2027", commissionRate: payouts.commissionRate, payouts: adminPayouts() })
+const money = () => ({ termName: "Term 1, 2027", commissionRate: platform.commission.defaultRate, payouts: adminPayouts() })
 
 function logOrg(org: AdminOrg, userId: string | null, text: string) {
   const actor = usersById().find((u) => u.id === userId)?.name ?? "SchoolShop"
@@ -408,6 +408,123 @@ function submissionView(x: SubmissionRecord): CatalogSubmission {
   const { catalogId: _c, ...rest } = x
   return { ...rest, checks, similar }
 }
+/* ── Platform settings ── */
+
+const platform = structuredClone(db.platformSettings)
+const settingsUpdated: PlatformSettings["updated"] = {
+  commission: { at: "2026-08-01T09:00:00+03:00", by: "SchoolShop Ops" },
+  payouts: { at: "2026-08-01T09:00:00+03:00", by: "SchoolShop Ops" },
+  terms: { at: "2026-09-15T11:30:00+03:00", by: "Kevin Mutai" },
+}
+const rateFor = (publisherId: string) => platform.commission.overrides.find((o) => o.publisherId === publisherId)?.rate ?? platform.commission.defaultRate
+/** Commission is fixed when the school confirms delivery, so only payouts still waiting for delivery take a new rate. */
+function repriceWaiting() {
+  for (const p of [...payouts.payouts, ...otherPayouts]) {
+    if (p.status !== "held") continue
+    p.commissionCents = Math.round(p.grossCents * rateFor(publisherOf(p.id)))
+    p.netCents = p.grossCents - p.commissionCents - p.deductionsCents
+  }
+  payouts.commissionRate = rateFor("pub-longhorn")
+}
+repriceWaiting()
+const settingsView = (): PlatformSettings => ({
+  ...structuredClone(platform),
+  publishers: [...adminOrgs.values()].filter((o) => o.type === "publisher" && o.status === "live").map((o) => ({ id: o.id, name: o.name })),
+  updated: settingsUpdated,
+})
+const pct = (r: number) => `${Math.round(r * 1000) / 10}%`
+
+/** Check a section and say in words what changed, for the audit log. */
+function applySettings(section: string, body: Record<string, unknown>): string[] {
+  const bad = (field: string, msg: string): never => { throw new HttpError(400, { [field]: [msg] }) }
+  const changes: string[] = []
+  const was = <T,>(label: string, a: T, b: T, show: (v: T) => string = String) => { if (a !== b) changes.push(`changed ${label} from ${show(a)} to ${show(b)}`) }
+  switch (section) {
+    case "commission": {
+      const next = body as PlatformSettings["commission"]
+      if (!(next.defaultRate >= 0 && next.defaultRate <= 0.3)) bad("defaultRate", "Commission must be between 0% and 30%.")
+      const seen = new Set<string>()
+      for (const o of next.overrides) {
+        if (!adminOrgs.get(o.publisherId)) bad("overrides", "Choose a publisher.")
+        if (seen.has(o.publisherId)) bad("overrides", `${o.publisherName} has two rates. Keep one.`)
+        seen.add(o.publisherId)
+        if (!(o.rate >= 0 && o.rate <= 0.3)) bad("overrides", `${o.publisherName}'s rate must be between 0% and 30%.`)
+        if (!o.note.trim()) bad("overrides", `Say why ${o.publisherName} has its own rate.`)
+      }
+      was("the default commission", platform.commission.defaultRate, next.defaultRate, pct)
+      for (const o of next.overrides) {
+        const before = platform.commission.overrides.find((x) => x.publisherId === o.publisherId)
+        if (!before) changes.push(`gave ${o.publisherName} its own rate of ${pct(o.rate)}`)
+        else was(`${o.publisherName}'s rate`, before.rate, o.rate, pct)
+      }
+      for (const o of platform.commission.overrides) if (!seen.has(o.publisherId)) changes.push(`put ${o.publisherName} back on the default rate`)
+      platform.commission = { defaultRate: next.defaultRate, overrides: next.overrides.map((o) => ({ ...o, publisherName: adminOrgs.get(o.publisherId)!.name, note: o.note.trim() })) }
+      repriceWaiting()
+      break
+    }
+    case "payouts": {
+      const next = body as PlatformSettings["payouts"]
+      if (!(Number.isInteger(next.holdDays) && next.holdDays >= 0 && next.holdDays <= 14)) bad("holdDays", "Between 0 and 14 days.")
+      if (!(next.minimumCents >= 0 && next.minimumCents <= 10_000_000)) bad("minimumCents", "Between KES 0 and KES 100,000.")
+      was("the hold after delivery", platform.payouts.holdDays, next.holdDays, (d) => `${d} day${d === 1 ? "" : "s"}`)
+      was("the minimum payout", platform.payouts.minimumCents, next.minimumCents, formatKes)
+      was("automatic release", platform.payouts.autoRelease, next.autoRelease, (v) => (v ? "on" : "off"))
+      platform.payouts = { holdDays: next.holdDays, minimumCents: next.minimumCents, autoRelease: !!next.autoRelease }
+      break
+    }
+    case "refunds": {
+      const next = body as PlatformSettings["refunds"]
+      if (!(next.autoApproveUpToCents >= 0 && next.autoApproveUpToCents <= 500_000)) bad("autoApproveUpToCents", "Between KES 0 and KES 5,000.")
+      was("automatic out-of-stock refunds", platform.refunds.autoApproveUpToCents, next.autoApproveUpToCents, (c) => (c ? `up to ${formatKes(c)}` : "off"))
+      was("parents' refund requests", platform.refunds.parentRequestsUntil, next.parentRequestsUntil, (v) => (v === "dispatched" ? "until dispatch" : "until the pack reaches school"))
+      platform.refunds = { autoApproveUpToCents: next.autoApproveUpToCents, parentRequestsUntil: next.parentRequestsUntil }
+      break
+    }
+    case "mpesa": {
+      const next = body as PlatformSettings["mpesa"]
+      if (!/^\d{5,7}$/.test(next.paybill)) bad("paybill", "A Paybill number has 5 to 7 digits.")
+      if (!(Number.isInteger(next.callbackTimeoutMinutes) && next.callbackTimeoutMinutes >= 1 && next.callbackTimeoutMinutes <= 10)) bad("callbackTimeoutMinutes", "Between 1 and 10 minutes.")
+      was("the Paybill", platform.mpesa.paybill, next.paybill)
+      was("the M-Pesa wait", platform.mpesa.callbackTimeoutMinutes, next.callbackTimeoutMinutes, (m) => `${m} min`)
+      platform.mpesa = { paybill: next.paybill, callbackTimeoutMinutes: next.callbackTimeoutMinutes }
+      break
+    }
+    case "terms": {
+      const next = (body as unknown as { terms: PlatformSettings["terms"] }).terms
+      const iso = /^\d{4}-\d{2}-\d{2}$/
+      next.forEach((t, i) => {
+        if (!t.name.trim()) bad(`terms.${i}.name`, "Give the term a name.")
+        if (![t.orderingOpensOn, t.startsOn, t.endsOn].every((d) => iso.test(d))) bad(`terms.${i}.startsOn`, "Enter all three dates.")
+        if (t.orderingOpensOn > t.startsOn) bad(`terms.${i}.orderingOpensOn`, "Ordering has to open before the term starts.")
+        if (t.startsOn >= t.endsOn) bad(`terms.${i}.endsOn`, "The term has to end after it starts.")
+        const clash = next.find((o, j) => j !== i && o.startsOn <= t.endsOn && t.startsOn <= o.endsOn)
+        if (clash) bad(`terms.${i}.startsOn`, `${t.name} overlaps ${clash.name}.`)
+      })
+      for (const t of next) {
+        const before = platform.terms.find((x) => x.id === t.id)
+        if (!before) changes.push(`added ${t.name} (${t.startsOn} to ${t.endsOn})`)
+        else if (before.startsOn !== t.startsOn || before.endsOn !== t.endsOn || before.orderingOpensOn !== t.orderingOpensOn || before.name !== t.name) changes.push(`changed ${t.name}'s dates`)
+      }
+      for (const t of platform.terms) if (!next.some((x) => x.id === t.id)) changes.push(`removed ${t.name}`)
+      platform.terms = next.map((t, i) => ({ ...t, id: t.id || `t-new-${Date.now()}-${i}`, name: t.name.trim() })).sort((a, b) => a.startsOn.localeCompare(b.startsOn))
+      break
+    }
+    case "support": {
+      const next = body as PlatformSettings["support"]
+      if (!normaliseKenyanPhone(next.phone)) bad("phone", "Enter a Kenyan phone number.")
+      if (next.whatsapp && !normaliseKenyanPhone(next.whatsapp)) bad("whatsapp", "Enter a Kenyan phone number.")
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next.email)) bad("email", "Enter an email address.")
+      if (!next.hours.trim()) bad("hours", "Say when parents can reach you.")
+      for (const [k, label] of [["phone", "the support phone"], ["whatsapp", "WhatsApp"], ["email", "the support email"], ["hours", "support hours"]] as const) was(label, platform.support[k], next[k].trim())
+      platform.support = { phone: next.phone.trim(), whatsapp: next.whatsapp.trim(), email: next.email.trim(), hours: next.hours.trim() }
+      break
+    }
+    default:
+      throw notFound()
+  }
+  return changes
+}
+
 const submissionList = () => [...submissions.values()].sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)).map(submissionView)
 
 function collectionRow(o: SchoolOrderDetail): CollectionRow {
@@ -478,6 +595,7 @@ const guards: Array<[method: string, path: RegExp, orgType: OrgType, permission:
   ["get", /^\/admin\/(money|collections|refunds)\//, "platform", "money.view"],
   ["*", /^\/admin\/catalog\//, "platform", "catalog.review"],
   ["get", /^\/admin\/audit\//, "platform", "audit.view"],
+  ["*", /^\/admin\/settings\//, "platform", "settings.fees"],
   ["post", /^\/admin\/(refunds|disputes)\//, "platform", "refunds.approve"],
   ["post", /^\/admin\/(payouts|payout-accounts)\//, "platform", "payouts.release"],
   ["*", /^\/admin\/orders\//, "platform", "orders.view"],
@@ -991,6 +1109,15 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
   }],
   ["get", "/school/orders/", () => ({ termName: db.schoolOverview.termName, orderDeadline: db.schoolOverview.orderDeadline, rows: schoolRows })],
   ["get", "/school/orders/:id/", ({ params }) => schoolOrders.get(params.id) ?? raise(notFound())],
+  ["get", "/admin/settings/", () => settingsView()],
+  ["put", "/admin/settings/:section/", ({ params, body, userId }) => {
+    const changes = applySettings(params.section, body)
+    if (changes.length) {
+      settingsUpdated[params.section] = { at: new Date().toISOString().replace(/\.\d+Z$/, "+00:00"), by: actorName(userId) }
+      audit(userId, "settings", changes.join("; "), { label: "Fees & settings", href: `/admin/settings#${params.section}` })
+    }
+    return settingsView()
+  }],
   ["get", "/admin/catalog/", () => submissionList()],
   ["post", "/admin/catalog/:id/:decision/", ({ params, body, userId }) => {
     const x = submissions.get(params.id) ?? raise(notFound())
