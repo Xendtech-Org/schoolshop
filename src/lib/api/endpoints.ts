@@ -15,6 +15,7 @@ import {
   adminOrgSchema,
   adminOrgSummarySchema,
   adminOverviewSchema,
+  publisherOverviewSchema,
   applicationDocumentsSchema,
   authTokensSchema,
   booklistSchema,
@@ -281,6 +282,7 @@ export async function downloadCatalogFile(fileId: string, name: string) {
 export const importPriceList = (file: File, dryRun: boolean) =>
   upload("/publisher/catalog/import/", catalogImportResultSchema, { file, dryRun: String(dryRun) })
 
+export const getPublisherOverview = () => get("/publisher/overview/", publisherOverviewSchema)
 export const listPublisherBatches = () => get("/publisher/batches/", z.array(schoolBatchSchema))
 export type DispatchInput = {
   carrier: string

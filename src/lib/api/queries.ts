@@ -35,6 +35,7 @@ export const queryKeys = {
   staff: (scope: string) => ["staff", scope] as const,
   schoolOrder: (id: string) => ["school-orders", id] as const,
   publisherBatches: ["publisher-batches"] as const,
+  publisherOverview: ["publisher-overview"] as const,
   catalog: ["publisher-catalog"] as const,
   payouts: ["publisher-payouts"] as const,
   settings: ["publisher-settings"] as const,
@@ -372,6 +373,8 @@ export const useRemindParents = () => {
   })
 }
 
+export const usePublisherOverview = () =>
+  useQuery({ queryKey: queryKeys.publisherOverview, queryFn: endpoints.getPublisherOverview })
 export const usePublisherBatches = () =>
   useQuery({ queryKey: queryKeys.publisherBatches, queryFn: endpoints.listPublisherBatches })
 
@@ -424,7 +427,7 @@ export const useDispatchBatch = () => {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ id, input }: { id: string; input: endpoints.DispatchInput }) => endpoints.dispatchBatch(id, input),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.publisherBatches }),
+    onSuccess: () => Promise.all([queryKeys.publisherBatches, queryKeys.publisherOverview].map((queryKey) => qc.invalidateQueries({ queryKey }))),
   })
 }
 

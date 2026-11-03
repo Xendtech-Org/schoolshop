@@ -835,6 +835,26 @@ export const platformSettingsSchema = z.object({
 export type PlatformSettings = z.infer<typeof platformSettingsSchema>
 export type SettingsSection = "commission" | "payouts" | "refunds" | "mpesa" | "terms" | "support"
 
+/** A publisher's term at a glance. */
+export const publisherOverviewSchema = z.object({
+  publisherName: z.string(),
+  termName: z.string(),
+  /** What parents paid for this publisher's titles this term, less anything it couldn't supply. */
+  salesCents: cents,
+  packs: z.number().int(),
+  schools: z.number().int(),
+  /** Share SchoolShop keeps, 0–1: the publisher's own rate or the default. */
+  commissionRate: z.number(),
+  batches: z.object({ collecting: z.number().int(), readyToPack: z.number().int(), dispatched: z.number().int(), received: z.number().int() }),
+  /** Schools whose packs are ready to go, soonest due first. */
+  toDispatch: z.array(z.object({ id: z.string(), schoolName: z.string(), town: z.string(), packs: z.number().int(), dueAtSchool: isoDate })),
+  catalog: z.object({ live: z.number().int(), inReview: z.number().int(), changesRequested: z.number().int(), lowStock: z.number().int() }),
+  /** Best sellers this term, by sales. */
+  topTitles: z.array(z.object({ title: z.string(), qty: z.number().int(), salesCents: cents })),
+  alerts: z.array(z.object({ id: z.string(), severity: z.enum(["high", "medium", "info"]), title: z.string(), detail: z.string(), href: z.string() })),
+})
+export type PublisherOverview = z.infer<typeof publisherOverviewSchema>
+
 export const orgStatusSchema = z.enum(["pending", "info_requested", "live", "suspended", "rejected"])
 export type OrgStatus = z.infer<typeof orgStatusSchema>
 

@@ -616,7 +616,7 @@ const guards: Array<[method: string, path: RegExp, orgType: OrgType, permission:
   ["*", /^\/school\/students\//, "school", "settings.manage"],
   ["*", /^\/school\/staff\//, "school", "staff.manage"],
   ["post", /^\/publisher\/batches\/[^/]+\/dispatch\/$/, "publisher", "dispatch.manage"],
-  ["get", /^\/publisher\/batches\/$/, "publisher", "orders.view"],
+  ["get", /^\/publisher\/(batches|overview)\/$/, "publisher", "orders.view"],
   ["*", /^\/publisher\/catalog\//, "publisher", "catalog.manage"],
   ["put", /^\/publisher\/payout-account\/$/, "publisher", "payouts.manage"],
   ["get", /^\/publisher\/payouts\/$/, "publisher", "payouts.view"],
@@ -1488,6 +1488,42 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
       else { row.remindedAt = new Date().toISOString(); sent++ }
     }
     return { sent, skipped }
+  }],
+  ["get", "/publisher/overview/", () => {
+    const all = [...batches.values()]
+    const live = all.filter((b) => b.status !== "collecting")
+    const ready = all.filter((b) => b.status === "ready_to_pack").sort((a, b) => a.dueAtSchool.localeCompare(b.dueAtSchool))
+    const titles = new Map<string, { qty: number; salesCents: number }>()
+    for (const b of all) for (const l of b.lines) {
+      const price = [...catalog.values()].find((c) => c.title === l.title)?.priceCents ?? 0
+      const t = titles.get(l.title) ?? { qty: 0, salesCents: 0 }
+      titles.set(l.title, { qty: t.qty + l.qty, salesCents: t.salesCents + l.qty * price })
+    }
+    const items = [...catalog.values()]
+    const low = items.filter((c) => c.status === "live" && c.stock <= c.lowStockAt)
+    const changes = items.filter((c) => c.review?.state === "changes_requested").length
+    const inReview = items.filter((c) => c.review?.state === "pending").length
+    const day = (iso: string) => new Date(`${iso}T00:00:00+03:00`).toLocaleDateString("en-KE", { weekday: "short", day: "numeric", month: "short" })
+    const alerts = [
+      ...(ready.length ? [{ id: "pa-1", severity: "high" as const, title: plural(ready.length, "school") + " ready to dispatch", detail: `First due at ${ready[0].schoolName} on ${day(ready[0].dueAtSchool)}`, href: "/publisher/dispatches" }] : []),
+      ...(changes ? [{ id: "pa-2", severity: "medium" as const, title: `${plural(changes, "title")} need changes`, detail: "SchoolShop asked for changes before they go live", href: "/publisher/catalog" }] : []),
+      ...(low.length ? [{ id: "pa-3", severity: "medium" as const, title: `${plural(low.length, "title")} low on stock`, detail: low.slice(0, 3).map((c) => c.title).join(", ") + (low.length > 3 ? ` and ${low.length - 3} more` : ""), href: "/publisher/catalog" }] : []),
+      ...(payouts.account.status !== "verified" ? [{ id: "pa-4", severity: "info" as const, title: "Payout account waiting for SchoolShop to confirm", detail: "SchoolShop calls you on the number they already have before paying into it", href: "/publisher/payouts" }] : []),
+      ...(inReview ? [{ id: "pa-5", severity: "info" as const, title: `${plural(inReview, "title")} in review`, detail: "SchoolShop checks new titles and price changes, usually within a working day", href: "/publisher/catalog" }] : []),
+    ]
+    return {
+      publisherName: "Longhorn",
+      termName: "Term 1, 2027",
+      salesCents: live.reduce((t, b) => t + b.valueCents, 0),
+      packs: live.reduce((t, b) => t + b.packs, 0),
+      schools: live.length,
+      commissionRate: payouts.commissionRate,
+      batches: { collecting: all.length - live.length, readyToPack: ready.length, dispatched: all.filter((b) => b.status === "dispatched").length, received: all.filter((b) => b.status === "received").length },
+      toDispatch: ready.slice(0, 5).map((b) => ({ id: b.id, schoolName: b.schoolName, town: b.town, packs: b.packs, dueAtSchool: b.dueAtSchool })),
+      catalog: { live: items.filter((c) => c.status === "live" && !c.review).length, inReview, changesRequested: changes, lowStock: low.length },
+      topTitles: [...titles].map(([title, t]) => ({ title, ...t })).sort((a, b) => b.salesCents - a.salesCents).slice(0, 5),
+      alerts,
+    }
   }],
   ["get", "/publisher/batches/", () => [...batches.values()]],
   ["post", "/publisher/batches/:id/dispatch/", ({ params, body }) => {
