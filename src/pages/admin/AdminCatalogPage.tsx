@@ -2,6 +2,7 @@ import { useRef, useState } from "react"
 import { useSearchParams } from "react-router"
 import { AlertTriangle, CheckCircle2, ChevronLeft, X, XCircle } from "lucide-react"
 
+import { FileList } from "@/components/catalog/FileList"
 import { PageHeader } from "@/components/common/PageHeader"
 import { QueryBoundary } from "@/components/common/QueryBoundary"
 import { Badge } from "@/components/ui/badge"
@@ -172,9 +173,33 @@ function Detail({ x, onNotice }: { x: CatalogSubmission; onNotice: (t: string) =
         </span>
       </header>
 
-      <dl className="grid gap-x-6 gap-y-3 rounded-xl bg-secondary/60 p-4 text-sm sm:grid-cols-2">
-        {facts.map(([t, v]) => <div key={t} className="flex min-w-0 flex-col"><dt className="text-[13px] text-muted-foreground">{t}</dt><dd className="font-medium break-words">{v}</dd></div>)}
-      </dl>
+      <div className="flex gap-4">
+        {x.coverUrl ? (
+          <a href={x.coverUrl} target="_blank" rel="noreferrer" className="shrink-0" aria-label={`Open the cover of ${x.title}`}>
+            <img src={x.coverUrl} alt="" className="h-32 w-24 rounded-md border object-cover" />
+          </a>
+        ) : (
+          <span className="flex h-32 w-24 shrink-0 items-center justify-center rounded-md border border-dashed px-2 text-center text-xs text-muted-foreground">No cover uploaded</span>
+        )}
+        <dl className="grid min-w-0 grow gap-x-6 gap-y-3 rounded-xl bg-secondary/60 p-4 text-sm sm:grid-cols-2">
+          {facts.map(([t, v]) => <div key={t} className="flex min-w-0 flex-col"><dt className="text-[13px] text-muted-foreground">{t}</dt><dd className="font-medium break-words">{v}</dd></div>)}
+        </dl>
+      </div>
+
+      <section aria-labelledby="sub-files" className="flex flex-col gap-2">
+        <h3 id="sub-files" className="font-semibold">Documents from {x.publisherName}</h3>
+        {x.files.some((f) => f.kind === "document") ? (
+          <FileList files={x.files.filter((f) => f.kind === "document")} />
+        ) : (
+          <p className="text-sm text-muted-foreground">None sent. Ask for changes if you need the KICD approval letter or sample pages.</p>
+        )}
+        {x.files.some((f) => f.kind === "resource") && (
+          <>
+            <h4 className="mt-2 text-sm font-semibold">Digital resources parents will get</h4>
+            <FileList files={x.files.filter((f) => f.kind === "resource")} />
+          </>
+        )}
+      </section>
 
       {x.status === "changes_requested" && x.note && <p className="rounded-xl bg-warn-bg px-4 py-3 text-sm text-warn-fg"><span className="font-semibold">Waiting on {x.publisherName}.</span> You asked: “{x.note}”</p>}
       {x.status === "rejected" && x.note && <p className="rounded-xl bg-secondary px-4 py-3 text-sm"><span className="font-semibold">Rejected.</span> {x.note}</p>}
