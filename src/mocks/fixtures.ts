@@ -845,6 +845,15 @@ export const platformSettings: Omit<PlatformSettings, "publishers" | "updated"> 
     { id: "t-2027-3", name: "Term 3, 2027", orderingOpensOn: "2027-07-19", startsOn: "2027-08-25", endsOn: "2027-10-30" },
   ],
   support: { phone: "0709 123 456", whatsapp: "0709 123 456", email: "help@schoolshop.co.ke", hours: "Mon–Sat, 7am–8pm" },
+  payments: {
+    fake: true,
+    mpesaReady: true,
+    cardReady: true,
+    sasapay: { enabled: true, mode: "sandbox", merchantCode: "600980", clientId: "••••a1b2", clientSecret: "••••c3d4", callbackUrl: "https://api.schoolshop.co.ke/api/payments/sasapay/callback/…" },
+    cardProvider: "stripe",
+    stripe: { secretKey: "••••9f8e", webhookSecret: "••••7d6c", webhookUrl: "https://api.schoolshop.co.ke/api/payments/stripe/webhook/" },
+    paystack: { secretKey: null, webhookUrl: "https://api.schoolshop.co.ke/api/payments/paystack/webhook/" },
+  },
 }
 
 /** Deliveries a school has disputed. The adapter links each to the affected parents' orders and the publisher's payout. */
