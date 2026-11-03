@@ -71,6 +71,7 @@ export const router = createBrowserRouter([
   { path: "forgot-password", element: <ForgotPasswordPage /> },
   { path: "reset-password", element: <ResetPasswordPage /> },
   { path: "register", element: <RegisterOrganisationPage /> },
+  { path: "register/documents", lazy: page(() => import("@/pages/auth/ApplicationDocumentsPage"), "ApplicationDocumentsPage") },
   {
     path: "parent",
     element: <RequireRole roles={["parent"]} />,
