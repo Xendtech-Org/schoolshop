@@ -269,6 +269,10 @@ export const catalogItemSchema = z.object({
   lowStockAt: z.number().int().nonnegative(),
   status: z.enum(["live", "draft"]),
   schoolListCount: z.number().int().nonnegative(),
+  /** New titles wait for SchoolShop to check them before schools can see them. */
+  review: z
+    .object({ state: z.enum(["pending", "changes_requested", "rejected"]), note: z.string().nullable(), submittedAt: isoDateTime })
+    .nullish(),
 })
 export type CatalogItem = z.infer<typeof catalogItemSchema>
 
@@ -720,6 +724,43 @@ export const adminRefundsSchema = z.object({
   refunded: z.array(refundRecordSchema),
 })
 export type AdminRefunds = z.infer<typeof adminRefundsSchema>
+
+/** A title (or a price change) a publisher sent for SchoolShop to check. */
+export const catalogSubmissionSchema = z.object({
+  id: z.string(),
+  publisherId: z.string(),
+  publisherName: z.string(),
+  kind: z.enum(["new_title", "price_change"]),
+  title: z.string(),
+  subject: z.string(),
+  gradeLabel: z.string(),
+  isbn: z.string().nullable(),
+  format: z.string(),
+  priceCents: cents,
+  previousPriceCents: cents.nullable(),
+  submittedAt: isoDateTime,
+  status: z.enum(["pending", "changes_requested", "approved", "rejected"]),
+  note: z.string().nullable(),
+  /** Checked automatically when the title comes in. */
+  checks: z.array(z.object({ id: z.string(), label: z.string(), result: z.enum(["pass", "warn", "fail"]), detail: z.string() })),
+  similar: z.array(z.object({ title: z.string(), publisherName: z.string(), priceCents: cents })),
+  history: z.array(z.object({ id: z.string(), at: isoDateTime, actor: z.string(), text: z.string() })),
+})
+export type CatalogSubmission = z.infer<typeof catalogSubmissionSchema>
+
+export const auditCategorySchema = z.enum(["organisations", "orders", "money", "catalog", "staff"])
+export type AuditCategory = z.infer<typeof auditCategorySchema>
+/** One thing someone at SchoolShop did. Written by the server; nobody can edit or delete it. */
+export const auditEntrySchema = z.object({
+  id: z.string(),
+  at: isoDateTime,
+  actor: z.string(),
+  role: z.string(),
+  category: auditCategorySchema,
+  text: z.string(),
+  target: z.object({ label: z.string(), href: z.string() }).nullable(),
+})
+export type AuditEntry = z.infer<typeof auditEntrySchema>
 
 export const orgStatusSchema = z.enum(["pending", "info_requested", "live", "suspended", "rejected"])
 export type OrgStatus = z.infer<typeof orgStatusSchema>

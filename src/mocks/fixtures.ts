@@ -1,6 +1,7 @@
 import type {
   AdminOrder,
   AdminOrg,
+  AuditCategory,
   AdminOverview,
   Booklist,
   CatalogItem,
@@ -356,7 +357,7 @@ export const products: Product[] = [
 
 type ProductExtra = Pick<ProductDetail, "description" | "isbn" | "pages" | "format">
 
-const productExtras: Record<string, ProductExtra> = {
+export const productExtras: Record<string, ProductExtra> = {
   "prd-g4-math": { description: "CBC-aligned learner's book with a worked example and practice activity for every lesson: numbers to 100,000, fractions, measurement, geometry and data handling.", isbn: "978-9966-36-412-8", pages: 184, format: "Paperback, A4" },
   "prd-g4-eng": { description: "Reading passages, grammar and writing activities for the Grade 4 English curriculum, with listening and speaking tasks for class work.", isbn: "978-9966-44-218-3", pages: 168, format: "Paperback, A4" },
   "prd-g4-kis": { description: "Kitabu cha mwanafunzi kinachofuata mtaala wa CBC: kusoma, sarufi, kuandika na mazoezi ya kusikiliza na kuzungumza.", isbn: "978-0-19-573904-1", pages: 160, format: "Paperback, A4" },
@@ -790,6 +791,39 @@ export const adminOrderExtras: Record<string, AdminOrderExtra> = {}
     })
   }
 }
+
+/*
+ * Titles and price changes publishers sent for checking. Longhorn's own new
+ * titles join this queue when its team adds them; these are everyone else's.
+ */
+type SubmissionSeed = { id: string; publisherId: string; publisherName: string; kind: "new_title" | "price_change"; title: string; subject: string; gradeLabel: string; isbn: string | null; format: string; price: number; previous?: number; hoursAgo: number; status?: "pending" | "changes_requested" | "approved" | "rejected"; note?: string }
+export const catalogSubmissionSeeds: SubmissionSeed[] = [
+  { id: "sub-1", publisherId: "pub-spotlight", publisherName: "Spotlight Publishers", kind: "new_title", title: "Spotlight Mathematics Grade 5", subject: "Mathematics", gradeLabel: "Grade 5", isbn: "978-9966-25-118-3", format: "Paperback, A4 · 192 pages", price: 760, hoursAgo: 30 },
+  { id: "sub-2", publisherId: "pub-moran", publisherName: "Moran", kind: "new_title", title: "Science & Technology Grade 5", subject: "Science", gradeLabel: "Grade 5", isbn: "978-9966-36-655-9", format: "Paperback, A4 · 176 pages", price: 700, hoursAgo: 20 },
+  { id: "sub-3", publisherId: "pub-mentor", publisherName: "Mentor Publishers", kind: "new_title", title: "Kenya Primary Atlas, 2027 edition", subject: "Social Studies", gradeLabel: "Grade 4", isbn: "978-9966-47-305-9", format: "Hardback, A4 · 96 pages", price: 1650, hoursAgo: 9 },
+  { id: "sub-4", publisherId: "pub-kasuku", publisherName: "Kasuku Stationers", kind: "price_change", title: "Exercise books, 96 pages ×10", subject: "Stationery", gradeLabel: "All grades", isbn: null, format: "Pack of 10", price: 520, previous: 450, hoursAgo: 6 },
+  { id: "sub-5", publisherId: "pub-oxford", publisherName: "Oxford University Press East Africa", kind: "new_title", title: "Kiswahili Mufti Grade 5", subject: "Kiswahili", gradeLabel: "Grade 5", isbn: "978-0-19-573904-9", format: "Paperback, A4 · 160 pages", price: 690, hoursAgo: 4 },
+  { id: "sub-6", publisherId: "pub-storymoja", publisherName: "Storymoja", kind: "new_title", title: "Hadithi za Bibi (reader)", subject: "Kiswahili", gradeLabel: "Grade 3", isbn: "978-9966-41-022-1", format: "Paperback, A5 · 48 pages", price: 350, hoursAgo: 2 },
+  { id: "sub-7", publisherId: "pub-klb", publisherName: "Kenya Literature Bureau", kind: "new_title", title: "Social Studies Grade 8", subject: "Social Studies", gradeLabel: "Grade 8", isbn: "978-9966-44-301-4", format: "Paperback, A4 · 220 pages", price: 840, hoursAgo: 52, status: "changes_requested", note: "The cover says Grade 7. Please upload the Grade 8 cover and the KICD approval letter." },
+  { id: "sub-8", publisherId: "pub-spotlight", publisherName: "Spotlight Publishers", kind: "price_change", title: "Spotlight English Grade 4", subject: "English", gradeLabel: "Grade 4", isbn: "978-9966-10-772-5", format: "Paperback, A4", price: 700, previous: 680, hoursAgo: 70, status: "approved" },
+  { id: "sub-9", publisherId: "pub-kasuku", publisherName: "Kasuku Stationers", kind: "new_title", title: "Geometry set (no brand)", subject: "Stationery", gradeLabel: "All grades", isbn: null, format: "Tin, 9 pieces", price: 950, hoursAgo: 96, status: "rejected", note: "KES 950 is more than twice what schools pay elsewhere for the same set." },
+]
+
+/** What SchoolShop staff did before the demo starts. Newer entries are written as people act. */
+export const auditSeeds: { hoursAgo: number; actor: string; role: string; category: AuditCategory; text: string; target: { label: string; href: string } | null }[] = [
+  { hoursAgo: 0.6, actor: "Kevin Mutai", role: "Operations", category: "orders", text: "noted on the order: \"Parent called, collecting Friday\"", target: { label: "SS-20418", href: "/admin/orders?show=all&order=ord-20418" } },
+  { hoursAgo: 2.2, actor: "Daniel Otieno", role: "Finance", category: "money", text: "released KES 57,200 to Longhorn Publishers · QBR7X2K9LM", target: { label: "Longhorn · Lakeview Primary", href: "/admin/payments?show=all&payout=po-4" } },
+  { hoursAgo: 3.5, actor: "Kevin Mutai", role: "Operations", category: "organisations", text: "asked Tumaini Primary for more information", target: { label: "Tumaini Primary", href: "/admin/organisations?org=app-tumaini" } },
+  { hoursAgo: 5, actor: "Kevin Mutai", role: "Operations", category: "catalog", text: "asked Kenya Literature Bureau to change Social Studies Grade 8: \"The cover says Grade 7.\"", target: { label: "Social Studies Grade 8", href: "/admin/catalog?tab=changes_requested&sub=sub-7" } },
+  { hoursAgo: 8, actor: "Daniel Otieno", role: "Finance", category: "money", text: "put Moran's Hillcrest Prep payout on hold: \"6 packs short\"", target: { label: "Moran · Hillcrest Prep", href: "/admin/payments?show=all&payout=apo-2" } },
+  { hoursAgo: 12, actor: "SchoolShop Ops", role: "Super admin", category: "staff", text: "invited Janet Wairimu as Support", target: { label: "Staff & roles", href: "/admin/staff" } },
+  { hoursAgo: 26, actor: "SchoolShop Ops", role: "Super admin", category: "catalog", text: "approved Spotlight English Grade 4 at KES 700 (was KES 680)", target: { label: "Spotlight English Grade 4", href: "/admin/catalog?tab=approved&sub=sub-8" } },
+  { hoursAgo: 30, actor: "Daniel Otieno", role: "Finance", category: "money", text: "refunded KES 3,600 to 6 Sunrise Academy parents: Social Studies Grade 4 missing", target: { label: "Refunded", href: "/admin/refunds?tab=refunded" } },
+  { hoursAgo: 44, actor: "Kevin Mutai", role: "Operations", category: "catalog", text: "rejected Kasuku Stationers' Geometry set: \"More than twice what schools pay elsewhere\"", target: { label: "Geometry set (no brand)", href: "/admin/catalog?tab=rejected&sub=sub-9" } },
+  { hoursAgo: 50, actor: "Kevin Mutai", role: "Operations", category: "organisations", text: "rejected QuickBooks Kenya Ltd's application", target: { label: "QuickBooks Kenya Ltd", href: "/admin/organisations?tab=rejected&org=app-quickbooks" } },
+  { hoursAgo: 90, actor: "SchoolShop Ops", role: "Super admin", category: "staff", text: "made Daniel Otieno Finance", target: { label: "Staff & roles", href: "/admin/staff" } },
+  { hoursAgo: 144, actor: "Kevin Mutai", role: "Operations", category: "organisations", text: "paused Brightstar School: \"Parents report paid packs not handed out\"", target: { label: "Brightstar School", href: "/admin/organisations?tab=suspended&org=sch-brightstar" } },
+]
 
 /** Deliveries a school has disputed. The adapter links each to the affected parents' orders and the publisher's payout. */
 export const disputeSeeds = [

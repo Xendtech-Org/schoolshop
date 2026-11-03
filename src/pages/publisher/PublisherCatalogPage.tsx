@@ -39,6 +39,18 @@ const stateBadge: Record<StockState, { label: string; variant: "success" | "warn
   draft: { label: "Draft", variant: "secondary" },
 }
 
+const reviewBadge = {
+  pending: { label: "In review", variant: "info" },
+  changes_requested: { label: "Changes asked", variant: "warning" },
+  rejected: { label: "Not approved", variant: "destructive" },
+} as const
+
+/** New titles show where they are in SchoolShop's review until they go live. */
+function ItemBadge({ item, st }: { item: CatalogItem; st: StockState }) {
+  const b = item.review ? reviewBadge[item.review.state] : stateBadge[st]
+  return <Badge variant={b.variant}>{b.label}</Badge>
+}
+
 const filters: { id: "all" | StockState; label: string }[] = [
   { id: "all", label: "All" },
   { id: "live", label: "Live" },
@@ -205,6 +217,7 @@ function Catalog({ items }: { items: CatalogItem[] }) {
                             <span className="flex min-w-0 flex-col">
                               <span className="font-semibold">{item.title}</span>
                               <span className="text-[13px] text-muted-foreground">{item.format}</span>
+                              {item.review?.note && <span className="text-[13px] text-warn-fg">SchoolShop: {item.review.note}</span>}
                             </span>
                           </div>
                         </TableCell>
@@ -215,7 +228,7 @@ function Catalog({ items }: { items: CatalogItem[] }) {
                           {item.stock.toLocaleString("en-KE")}
                         </TableCell>
                         <TableCell className="text-right">{item.schoolListCount}</TableCell>
-                        <TableCell><Badge variant={stateBadge[st].variant}>{stateBadge[st].label}</Badge></TableCell>
+                        <TableCell><ItemBadge item={item} st={st} /></TableCell>
                         <TableCell className="text-right">
                           <Button variant="ghost" size="sm" onClick={() => setEditing(item)} aria-label={`Edit ${item.title}`}>
                             <Pencil aria-hidden /> Edit
@@ -238,8 +251,9 @@ function Catalog({ items }: { items: CatalogItem[] }) {
                       <span className="flex min-w-0 grow flex-col">
                         <span className="font-semibold">{item.title}</span>
                         <span className="text-[13px] text-muted-foreground">{item.gradeLabel} · {item.format}</span>
+                        {item.review?.note && <span className="text-[13px] text-warn-fg">SchoolShop: {item.review.note}</span>}
                       </span>
-                      <Badge variant={stateBadge[st].variant}>{stateBadge[st].label}</Badge>
+                      <ItemBadge item={item} st={st} />
                     </div>
                     <dl className="grid grid-cols-3 gap-2 text-sm">
                       <div><dt className="text-muted-foreground">Price</dt><dd className="font-semibold">{formatKes(item.priceCents)}</dd></div>
@@ -442,7 +456,7 @@ function TitleForm({ item, onDone }: { item: CatalogItem | null; onDone: () => v
               <input type="checkbox" checked={field.value} onChange={(e) => field.onChange(e.target.checked)} className="mt-0.5 size-5 accent-[var(--teal)]" />
               <span className="flex flex-col gap-0.5">
                 <span className="font-semibold">Live</span>
-                <span className="text-sm text-muted-foreground">Schools can find it and add it to booklists. Untick to keep it as a draft.</span>
+                <span className="text-sm text-muted-foreground">Schools can find it and add it to booklists. Anything new goes live once SchoolShop has checked it, usually within a working day. Untick to keep it as a draft.</span>
               </span>
             </label>
           </FormItem>

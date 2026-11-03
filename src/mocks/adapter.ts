@@ -1,6 +1,6 @@
 import { AxiosError, type AxiosAdapter, type AxiosResponse, type InternalAxiosRequestConfig } from "axios"
 
-import type { AdminOrder, AdminOrg, AdminPayout, AdminRefunds, Collection, Dispute, RefundRecord, Booklist, CatalogItem, CollectionRow, Order, Payment, PublisherPayouts, SchoolOrderDetail, StudentOrderRow } from "@/lib/api/schemas"
+import type { AdminOrder, AdminOrg, AdminPayout, AdminRefunds, AuditCategory, AuditEntry, CatalogSubmission, Collection, Dispute, RefundRecord, Booklist, CatalogItem, CollectionRow, Order, Payment, PublisherPayouts, SchoolOrderDetail, StudentOrderRow } from "@/lib/api/schemas"
 import { ownerRole, permissionsFor, roleDef, type OrgType } from "@/lib/access"
 import { formatKes } from "@/lib/format"
 import * as db from "@/mocks/fixtures"
@@ -182,6 +182,17 @@ function adminOrder(o: Order): AdminOrder {
 function logOrder(o: Order, userId: string | null, text: string) {
   const x = orderExtra(o)
   x.events.unshift({ id: `ev-${Date.now()}-${x.events.length}`, at: stamp(), actor: usersById().find((u) => u.id === userId)?.name ?? "SchoolShop", text })
+  audit(userId, text.startsWith("refunded") ? "money" : "orders", text, { label: o.number, href: `/admin/orders?show=all&order=${o.id}` })
+}
+
+/* ── Audit log: every decision SchoolShop staff make, newest first. Append-only. ── */
+
+const auditLog: AuditEntry[] = db.auditSeeds.map((e, i) => ({ id: `au-seed-${i}`, at: new Date(Date.now() - e.hoursAgo * 3_600_000).toISOString().replace(/\.\d+Z$/, "+00:00"), actor: e.actor, role: e.role, category: e.category, text: e.text, target: e.target }))
+let auditSeq = 0
+function audit(userId: string | null, category: AuditCategory, text: string, target: AuditEntry["target"]) {
+  const rec = staffRecord(userId, "platform")
+  if (!rec) return
+  auditLog.unshift({ id: `au-${++auditSeq}`, at: new Date().toISOString().replace(/\.\d+Z$/, "+00:00"), actor: rec.user.name, role: roleDef("platform", rec.member.role)?.label ?? rec.member.role, category, text, target })
 }
 
 /** Keep the school's own order list in step with what admins change. */
@@ -271,6 +282,7 @@ function settleDispute(d: NonNullable<ReturnType<typeof disputes.get>>, resoluti
   d.status = "resolved"
   d.resolution = resolution
   d.events.unshift({ id: `de-${Date.now()}`, at: stamp(), actor: actorName(userId), text: `settled it. ${resolution}` })
+  audit(userId, "money", `settled ${d.schoolName}'s dispute with ${d.publisherName}. ${resolution}`, { label: `${d.schoolName} · ${d.publisherName}`, href: "/admin/refunds?tab=disputes" })
   if (d.payoutId) {
     const p = findPayout(d.payoutId)
     if (p.status === "on_hold") {
@@ -318,14 +330,85 @@ function findPayout(id: string): PayoutRecord & { publisherId?: string; holdReas
 }
 const publisherOf = (id: string) => (payouts.payouts.some((p) => p.id === id) ? "pub-longhorn" : findPayout(id).publisherId!)
 function logPayout(id: string, userId: string | null, text: string) {
-  payoutNote(findPayout(id)).events.unshift({ id: `pe-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, at: stamp(), actor: usersById().find((u) => u.id === userId)?.name ?? "SchoolShop", text })
+  const p = findPayout(id)
+  payoutNote(p).events.unshift({ id: `pe-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, at: stamp(), actor: usersById().find((u) => u.id === userId)?.name ?? "SchoolShop", text })
+  const publisher = publisherOf(id) === "pub-longhorn" ? "Longhorn Publishers" : publisherAccounts[publisherOf(id)].name
+  audit(userId, "money", text, { label: `${publisher} · ${p.schoolName}`, href: `/admin/payments?show=all&payout=${id}` })
 }
 const money = () => ({ termName: "Term 1, 2027", commissionRate: payouts.commissionRate, payouts: adminPayouts() })
 
 function logOrg(org: AdminOrg, userId: string | null, text: string) {
   const actor = usersById().find((u) => u.id === userId)?.name ?? "SchoolShop"
   org.history.unshift({ id: `h-${Date.now()}-${org.history.length}`, at: new Date().toISOString().replace("Z", "+00:00"), actor, text })
+  audit(userId, "organisations", text, { label: org.name, href: `/admin/organisations?org=${org.id}` })
 }
+
+/* ── Catalog review: publishers' new titles and price changes wait for a check. ── */
+
+const gradeBandOf = (label: string): CatalogItem["gradeBand"] => {
+  if (/^PP/i.test(label)) return "pp"
+  const n = Number(label.match(/\d+/)?.[0])
+  return !n ? "all" : n <= 3 ? "1-3" : n <= 6 ? "4-6" : "7-9"
+}
+/** "Moran's", but "Longhorn Publishers'". */
+const possessive = (name: string) => (name.endsWith("s") ? `${name}'` : `${name}'s`)
+const isbnValid = (isbn: string) => {
+  const d = isbn.replace(/[^\d]/g, "")
+  if (d.length !== 13) return false
+  const sum = [...d.slice(0, 12)].reduce((t, c, i) => t + Number(c) * (i % 2 ? 3 : 1), 0)
+  return (10 - (sum % 10)) % 10 === Number(d[12])
+}
+type SubmissionRecord = Omit<CatalogSubmission, "checks" | "similar"> & { catalogId?: string }
+const submissions = new Map<string, SubmissionRecord>(db.catalogSubmissionSeeds.map((x) => {
+  const at = new Date(Date.now() - x.hoursAgo * 3_600_000).toISOString().replace(/\.\d+Z$/, "+00:00")
+  const decided = x.status && x.status !== "pending"
+  return [x.id, {
+    id: x.id, publisherId: x.publisherId, publisherName: x.publisherName, kind: x.kind, title: x.title, subject: x.subject, gradeLabel: x.gradeLabel, isbn: x.isbn, format: x.format,
+    priceCents: x.price * 100, previousPriceCents: x.previous ? x.previous * 100 : null, submittedAt: at, status: x.status ?? "pending", note: x.note ?? null,
+    history: [
+      ...(decided ? [{ id: "decided", at: new Date(Date.parse(at) + 3 * 3_600_000).toISOString().replace(/\.\d+Z$/, "+00:00"), actor: x.status === "approved" ? "SchoolShop Ops" : "Kevin Mutai", text: x.status === "approved" ? "approved it" : x.status === "rejected" ? `rejected it: "${x.note}"` : `asked for changes: "${x.note}"` }] : []),
+      { id: "sent", at, actor: x.publisherName, text: x.kind === "new_title" ? "sent a new title" : `asked to change the price from ${formatKes((x.previous ?? 0) * 100)} to ${formatKes(x.price * 100)}` },
+    ],
+  }]
+}))
+
+/** The automatic checks: a real ISBN nobody else uses, a price in line with similar titles, a CBC grade. */
+function submissionView(x: SubmissionRecord): CatalogSubmission {
+  const similar = db.products
+    .filter((p) => p.subject.toLowerCase().split(" ")[0] === x.subject.toLowerCase().split(" ")[0] && (gradeBandOf(x.gradeLabel) === "all" || p.gradeBand === gradeBandOf(x.gradeLabel)) && p.title !== x.title)
+    .slice(0, 4)
+    .map((p) => ({ title: p.title, publisherName: p.publisherName, priceCents: p.priceCents }))
+  const checks: CatalogSubmission["checks"] = []
+  if (x.kind === "new_title" || x.isbn) {
+    const others = [
+      ...db.products.filter((p) => p.title !== x.title).map((p) => ({ isbn: db.productExtras[p.id]?.isbn, owner: `${p.publisherName}'s ${p.title}` })),
+      ...[...catalog.values()].filter((c) => c.id !== x.catalogId).map((c) => ({ isbn: c.isbn, owner: `Longhorn's ${c.title}` })),
+    ]
+    const clash = x.isbn ? others.find((o) => o.isbn && o.isbn.replace(/\D/g, "") === x.isbn!.replace(/\D/g, "")) : undefined
+    checks.push(
+      !x.isbn ? { id: "isbn", label: "ISBN", result: x.subject === "Stationery" ? "pass" : "warn", detail: x.subject === "Stationery" ? "Not needed for stationery." : "No ISBN, so schools can't check the edition." }
+      : !isbnValid(x.isbn) ? { id: "isbn", label: "ISBN", result: "fail", detail: `${x.isbn} isn't a valid ISBN-13. The last digit doesn't match.` }
+      : clash ? { id: "isbn", label: "ISBN", result: "fail", detail: `${x.isbn} is already used by ${clash.owner}.` }
+      : { id: "isbn", label: "ISBN", result: "pass", detail: `${x.isbn} is valid and not used by any other title.` },
+    )
+  }
+  if (x.kind === "price_change" && x.previousPriceCents) {
+    const up = (x.priceCents - x.previousPriceCents) / x.previousPriceCents
+    checks.push({ id: "price", label: "Price change", result: up > 0.1 ? "warn" : "pass", detail: `${up >= 0 ? "Up" : "Down"} ${Math.round(Math.abs(up) * 100)}%, from ${formatKes(x.previousPriceCents)}.${up > 0.1 ? " Parents with open orders keep the old price." : ""}` })
+  } else if (similar.length) {
+    const sorted = similar.map((p) => p.priceCents).sort((a, b) => a - b)
+    const median = sorted[Math.floor(sorted.length / 2)]
+    const over = (x.priceCents - median) / median
+    checks.push({ id: "price", label: "Price", result: over > 1 ? "fail" : over > 0.2 ? "warn" : "pass", detail: over > 0.2 ? `${Math.round(over * 100)}% above similar titles (around ${formatKes(median)}).` : `In line with similar titles (around ${formatKes(median)}).` })
+  } else checks.push({ id: "price", label: "Price", result: "pass", detail: "No similar titles on SchoolShop to compare with." })
+  const grade = /^(PP[12]|Grade [1-9])$/.test(x.gradeLabel) || x.gradeLabel === "All grades"
+  checks.push({ id: "grade", label: "CBC grade", result: grade ? "pass" : "warn", detail: x.gradeLabel === "All grades" ? "For every grade, like stationery." : grade ? `${x.gradeLabel} is a CBC grade.` : `"${x.gradeLabel}" isn't a CBC grade. Check where it belongs.` })
+  const org = adminOrgs.get(x.publisherId)
+  checks.push({ id: "publisher", label: "Publisher", result: org?.status === "live" ? "pass" : "fail", detail: org?.status === "live" ? `${x.publisherName} is verified.` : `${x.publisherName} isn't verified or is paused.` })
+  const { catalogId: _c, ...rest } = x
+  return { ...rest, checks, similar }
+}
+const submissionList = () => [...submissions.values()].sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)).map(submissionView)
 
 function collectionRow(o: SchoolOrderDetail): CollectionRow {
   const waitingFor = o.shipments.filter((s) => s.status !== "received").map((s) => s.publisherName)
@@ -393,6 +476,8 @@ const guards: Array<[method: string, path: RegExp, orgType: OrgType, permission:
   ["get", /^\/admin\/organisations\//, "platform", "orgs.view"],
   ["post", /^\/admin\/orders\/[^/]+\/(refund|resolve)\/$/, "platform", "refunds.approve"],
   ["get", /^\/admin\/(money|collections|refunds)\//, "platform", "money.view"],
+  ["*", /^\/admin\/catalog\//, "platform", "catalog.review"],
+  ["get", /^\/admin\/audit\//, "platform", "audit.view"],
   ["post", /^\/admin\/(refunds|disputes)\//, "platform", "refunds.approve"],
   ["post", /^\/admin\/(payouts|payout-accounts)\//, "platform", "payouts.release"],
   ["*", /^\/admin\/orders\//, "platform", "orders.view"],
@@ -432,6 +517,7 @@ function directoryFor(scope: string, userId: string | null) {
 function logStaff(orgType: OrgType, userId: string | null, text: string) {
   const actor = usersById().find((u) => u.id === userId)?.name ?? "Someone"
   directories[orgType].activity.unshift({ id: `a-${++staffSeq}`, at: new Date().toISOString(), actor, text })
+  if (orgType === "platform") audit(userId, "staff", text, { label: "Staff & roles", href: "/admin/staff" })
 }
 
 const staffRoutes: Array<[method: string, pattern: string, handler: (ctx: { params: Record<string, string>; body: Record<string, unknown>; userId: string | null }) => unknown]> = [
@@ -905,6 +991,42 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
   }],
   ["get", "/school/orders/", () => ({ termName: db.schoolOverview.termName, orderDeadline: db.schoolOverview.orderDeadline, rows: schoolRows })],
   ["get", "/school/orders/:id/", ({ params }) => schoolOrders.get(params.id) ?? raise(notFound())],
+  ["get", "/admin/catalog/", () => submissionList()],
+  ["post", "/admin/catalog/:id/:decision/", ({ params, body, userId }) => {
+    const x = submissions.get(params.id) ?? raise(notFound())
+    if (x.status !== "pending" && x.status !== "changes_requested") throw new HttpError(409, { detail: "This has already been decided." })
+    const note = String(body.note ?? "").trim()
+    const linked = x.catalogId ? catalog.get(x.catalogId) : undefined
+    const target = { label: x.title, href: `/admin/catalog?sub=${x.id}` }
+    let text: string, own: string
+    if (params.decision === "approve") {
+      const fails = submissionView(x).checks.filter((c) => c.result === "fail")
+      if (fails.length) throw new HttpError(400, { detail: `Can't approve with a failed check: ${fails.map((c) => c.label).join(", ")}. Ask for changes instead.` })
+      x.status = "approved"
+      if (x.kind === "new_title") {
+        db.products.push({ id: `prd-${x.id}`, title: x.title, publisherName: x.publisherId === "pub-longhorn" ? "Longhorn" : x.publisherName, subject: x.subject, gradeLabel: x.gradeLabel, gradeBand: gradeBandOf(x.gradeLabel), priceCents: x.priceCents, schoolListCount: 0, category: x.subject === "Stationery" ? "stationery" : "textbook", audience: "school" })
+        if (x.isbn) db.productExtras[`prd-${x.id}`] = { description: "", isbn: x.isbn, pages: null, format: x.format }
+      } else {
+        const product = db.products.find((p) => p.title === x.title)
+        if (product) product.priceCents = x.priceCents
+      }
+      if (linked) Object.assign(linked, { status: "live", review: null })
+      own = x.kind === "new_title" ? `approved it at ${formatKes(x.priceCents)}. Schools can add it to booklists.` : `approved the new price, ${formatKes(x.priceCents)}`
+      text = x.kind === "new_title" ? `approved ${possessive(x.publisherName)} ${x.title} at ${formatKes(x.priceCents)}` : `approved ${x.title} at ${formatKes(x.priceCents)} (was ${formatKes(x.previousPriceCents ?? 0)})`
+    } else if (params.decision === "request-changes" || params.decision === "reject") {
+      if (!note) throw new HttpError(400, { note: ["Tell the publisher what to fix. They see this."] })
+      const changes = params.decision === "request-changes"
+      x.status = changes ? "changes_requested" : "rejected"
+      x.note = note
+      if (linked) linked.review = { state: changes ? "changes_requested" : "rejected", note, submittedAt: linked.review?.submittedAt ?? x.submittedAt }
+      own = changes ? `asked for changes: "${note}"` : `rejected it: "${note}"`
+      text = changes ? `asked ${x.publisherName} to change ${x.title}: "${note}"` : `rejected ${possessive(x.publisherName)} ${x.title}: "${note}"`
+    } else throw notFound()
+    x.history.unshift({ id: `sh-${Date.now()}`, at: new Date().toISOString().replace(/\.\d+Z$/, "+00:00"), actor: actorName(userId), text: own })
+    audit(userId, "catalog", text, target)
+    return submissionList()
+  }],
+  ["get", "/admin/audit/", () => auditLog],
   ["get", "/admin/refunds/", () => refundsView()],
   ["post", "/admin/refunds/approve/", ({ body, userId }) => {
     const ids = (body.orderIds as string[]) ?? []
@@ -1239,7 +1361,17 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
   ["post", "/publisher/catalog/", ({ body }) => {
     const isbn = body.isbn ? String(body.isbn) : null
     if (isbn && [...catalog.values()].some((c) => c.isbn === isbn)) throw new HttpError(400, { isbn: ["A title with this ISBN is already in your catalog."] })
-    const item = { ...(body as Omit<CatalogItem, "id" | "schoolListCount">), isbn, id: `cat-${++catalogSeq}`, schoolListCount: 0 }
+    const item: CatalogItem = { ...(body as Omit<CatalogItem, "id" | "schoolListCount">), isbn, id: `cat-${++catalogSeq}`, schoolListCount: 0, review: null }
+    // A title the publisher wants schools to see waits for SchoolShop to check it first.
+    if (item.status === "live") {
+      const at = new Date().toISOString().replace(/\.\d+Z$/, "+00:00")
+      Object.assign(item, { status: "draft", review: { state: "pending", note: null, submittedAt: at } })
+      submissions.set(`sub-${item.id}`, {
+        id: `sub-${item.id}`, catalogId: item.id, publisherId: "pub-longhorn", publisherName: "Longhorn Publishers", kind: "new_title", title: item.title, subject: item.subject, gradeLabel: item.gradeLabel,
+        isbn: item.isbn, format: item.format, priceCents: item.priceCents, previousPriceCents: null, submittedAt: at, status: "pending", note: null,
+        history: [{ id: "sent", at, actor: "Longhorn Publishers", text: "sent a new title" }],
+      })
+    }
     catalog.set(item.id, item)
     return item
   }],
@@ -1262,6 +1394,8 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     const href = "/admin/orders?show=attention"
     const { requests, disputes: allDisputes } = refundsView()
     const openDisputes = allDisputes.filter((d) => d.status === "open")
+    const toReview = [...submissions.values()].filter((x) => x.status === "pending")
+    if (toReview.length) alerts.unshift({ id: "al-6", severity: "info", title: `${toReview.length} title${toReview.length === 1 ? "" : "s"} to review`, detail: `${new Set(toReview.map((x) => x.publisherName)).size} publishers`, href: "/admin/catalog" })
     if (requests.length) alerts.unshift({ id: "al-5", severity: "info", title: `${requests.length} refund${requests.length === 1 ? "" : "s"} to approve`, detail: `${formatKes(requests.reduce((t, r) => t + r.amountCents, 0))} back to parents`, href: "/admin/refunds" })
     if (openDisputes.length) alerts.unshift({ id: "al-4", severity: "medium", title: `${openDisputes.length} delivery dispute${openDisputes.length === 1 ? "" : "s"}`, detail: openDisputes.map((d) => `${d.schoolName} · ${d.publisherName} · ${d.packs} packs`).join("; "), href: "/admin/refunds?tab=disputes" })
     if (unconfirmed.length) alerts.unshift({ id: "al-3", severity: "medium", title: `${unconfirmed.length} M-Pesa payment${unconfirmed.length === 1 ? "" : "s"} not confirmed`, detail: "No callback after 2 minutes, status check queued", href })
