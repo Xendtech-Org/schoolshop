@@ -17,8 +17,8 @@ import { NativeSelect } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { ApiError } from "@/lib/api/client"
 import type { CatalogItemInput } from "@/lib/api/endpoints"
-import { useCatalog, useSaveCatalogItem } from "@/lib/api/queries"
-import type { CatalogItem } from "@/lib/api/schemas"
+import { useCatalog, useImportPriceList, useSaveCatalogItem } from "@/lib/api/queries"
+import type { CatalogImportResult, CatalogItem } from "@/lib/api/schemas"
 import { formatKes } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
@@ -486,60 +486,49 @@ function TitleForm({ item, onDone, onCreated }: { item: CatalogItem | null; onDo
 
 /* ── Price list upload ───────────────────────────────────────── */
 
-const templateCsv = "title,subject,grade,isbn,price,stock\nMathematics Activities Grade 5,Mathematics,Grade 5,978-9966-00-000-0,650,500\n"
+const templateCsv =
+  "title,subject,grade,isbn,price,stock\n" +
+  "Mathematics Activities Grade 5,Mathematics,Grade 5,978-9966-36-470-8,650,500\n" +
+  '"Exercise books, 96 pages (×10)",Stationery,All grades,,550,1000\n'
 
 /**
  * Adds titles from a CSV price list (columns: title, subject, grade, isbn,
- * price, stock). New titles start as drafts so the publisher can check them.
+ * price, stock). SchoolShop checks the whole file first and shows any problem
+ * rows; the good rows are then added as drafts so the publisher can review them.
  */
 function PriceListUpload() {
   const input = useRef<HTMLInputElement>(null)
-  const save = useSaveCatalogItem()
+  const run = useImportPriceList()
+  const [file, setFile] = useState<File | null>(null)
+  const [check, setCheck] = useState<CatalogImportResult | null>(null)
   const [message, setMessage] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  async function onFile(file: File) {
-    setBusy(true)
+  const close = () => {
+    setFile(null)
+    setCheck(null)
+    setError(null)
+  }
+  const onFile = (f: File) => {
     setMessage(null)
-    const [header, ...rows] = (await file.text()).split(/\r?\n/).filter((l) => l.trim())
-    const cols = (header ?? "").split(",").map((c) => c.trim().toLowerCase())
-    const at = (row: string[], name: string) => (row[cols.indexOf(name)] ?? "").trim()
-    let added = 0
-    let skipped = 0
-    for (const line of rows) {
-      const row = line.split(",")
-      const gradeLabel = at(row, "grade")
-      const price = Number(at(row, "price"))
-      const stock = Number(at(row, "stock") || 0)
-      if (!at(row, "title") || !(price > 0) || !Number.isInteger(stock) || stock < 0) {
-        skipped += 1
-        continue
+    setError(null)
+    setFile(f)
+    run.mutate({ file: f, dryRun: true }, { onSuccess: setCheck, onError: (e) => setError(errorOf(e)) })
+  }
+  const importRows = () => {
+    if (!file) return
+    run.mutate(
+      { file, dryRun: false },
+      {
+        onSuccess: (r) => {
+          setMessage(`Added ${plural(r.created, "title")} as drafts${r.errors.length ? `, skipped ${plural(new Set(r.errors.map((x) => x.line)).size, "row")}` : ""}.`)
+          close()
+        },
+        onError: (e) => setError(errorOf(e)),
       }
-      try {
-        await save.mutateAsync({
-          input: {
-            title: at(row, "title"),
-            subject: at(row, "subject") || "General",
-            gradeLabel: gradeLabel || "All grades",
-            gradeBand: bandFor(gradeLabel),
-            isbn: at(row, "isbn") || null,
-            format: formats[0],
-            priceCents: Math.round(price * 100),
-            stock,
-            lowStockAt: 100,
-            status: "draft",
-          },
-        })
-        added += 1
-      } catch {
-        skipped += 1
-      }
-    }
-    setBusy(false)
-    setMessage(
-      `Added ${plural(added, "title")} as drafts${skipped ? `, skipped ${plural(skipped, "row")} with missing or invalid values` : ""}.`
     )
   }
+  const badRows = check ? new Set(check.errors.map((x) => x.line)).size : 0
 
   return (
     <div className="flex flex-col items-end gap-1">
@@ -552,12 +541,12 @@ function PriceListUpload() {
         aria-hidden
         onChange={(e) => {
           const f = e.target.files?.[0]
-          if (f) void onFile(f)
           e.target.value = ""
+          if (f) onFile(f)
         }}
       />
-      <Button variant="outline" onClick={() => input.current?.click()} disabled={busy}>
-        <Upload aria-hidden /> {busy ? "Uploading…" : "Upload price list"}
+      <Button variant="outline" onClick={() => input.current?.click()} disabled={run.isPending}>
+        <Upload aria-hidden /> {run.isPending && !check ? "Checking…" : "Upload price list"}
       </Button>
       <a
         href={`data:text/csv;charset=utf-8,${encodeURIComponent(templateCsv)}`}
@@ -567,6 +556,45 @@ function PriceListUpload() {
         Download CSV template
       </a>
       {message && <p role="status" className="max-w-xs text-right text-xs text-muted-foreground">{message}</p>}
+      {error && !file && <p role="alert" className="max-w-xs text-right text-xs text-destructive">{error}</p>}
+
+      <Dialog.Root open={file !== null && (check !== null || error !== null)} onOpenChange={(open) => !open && close()}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-40 bg-ink/40" />
+          <Dialog.Content className="fixed top-1/2 left-1/2 z-50 flex max-h-[85dvh] w-[min(560px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 overflow-y-auto rounded-3xl bg-surface p-6 outline-none">
+            <Dialog.Title className="font-display text-xl font-semibold">{file?.name}</Dialog.Title>
+            {check && (
+              <Dialog.Description className="text-sm text-muted-foreground">
+                {check.valid > 0 ? `${plural(check.valid, "title")} ready to add as drafts.` : "No titles in this file can be added yet."}
+                {badRows > 0 && ` ${plural(badRows, "row")} ${badRows === 1 ? "has" : "have"} a problem and will be skipped. Fix ${badRows === 1 ? "it" : "them"} and upload the file again to add ${badRows === 1 ? "it" : "them"} too.`}
+              </Dialog.Description>
+            )}
+            {check && check.errors.length > 0 && (
+              <ul className="divide-y rounded-xl border text-sm">
+                {check.errors.map((x, i) => (
+                  <li key={i} className="flex gap-3 px-4 py-2.5">
+                    <span className="shrink-0 font-semibold">Row {x.line}</span>
+                    <span className="text-muted-foreground">{x.message}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {error && <p role="alert" className="text-sm font-medium text-destructive">{error}</p>}
+            <div className="flex gap-3">
+              <Dialog.Close asChild>
+                <Button variant="outline" className="grow">Cancel</Button>
+              </Dialog.Close>
+              {check && check.valid > 0 && (
+                <Button className="grow" onClick={importRows} disabled={run.isPending}>
+                  {run.isPending ? "Adding…" : `Add ${plural(check.valid, "title")}`}
+                </Button>
+              )}
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </div>
   )
 }
+
+const errorOf = (e: unknown) => (e instanceof ApiError ? (e.fieldErrors.file?.[0] ?? e.message) : "Something went wrong.")
