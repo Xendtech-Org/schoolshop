@@ -122,7 +122,7 @@ function Catalog({ items }: { items: CatalogItem[] }) {
           <>
             <PriceListUpload />
             <Button onClick={() => setEditing("new")}>
-              <Plus aria-hidden /> Add title
+              <Plus aria-hidden /> Add product
             </Button>
           </>
         }
@@ -336,7 +336,7 @@ function TitleSheet({ editing, onClose, onCreated }: { editing: CatalogItem | "n
         >
           <div className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b bg-surface px-6 py-5">
             <div className="flex flex-col gap-1">
-              <Dialog.Title className="font-display text-xl font-semibold">{item ? "Edit title" : "Add a title"}</Dialog.Title>
+              <Dialog.Title className="font-display text-xl font-semibold">{item ? "Edit product" : "Add a product"}</Dialog.Title>
               <Dialog.Description className="text-sm text-muted-foreground">
                 {item ? `On ${plural(item.schoolListCount, "school list")}.` : "Schools can add it to their booklists once it's live."}
               </Dialog.Description>
@@ -466,7 +466,7 @@ function TitleForm({ item, onDone, onCreated }: { item: CatalogItem | null; onDo
         {item ? (
           <TitleUploads itemId={item.id} />
         ) : (
-          <p className="text-sm text-muted-foreground">After you add the title you can upload its cover, documents for SchoolShop's review, and digital resources.</p>
+          <p className="text-sm text-muted-foreground">After you add the product you can upload its cover, documents for SchoolShop's review, and digital resources.</p>
         )}
         {form.formState.errors.root && (
           <p role="alert" className="text-sm font-medium text-destructive">{form.formState.errors.root.message}</p>
@@ -476,7 +476,7 @@ function TitleForm({ item, onDone, onCreated }: { item: CatalogItem | null; onDo
             <Button type="button" variant="outline" size="lg" className="grow">Cancel</Button>
           </Dialog.Close>
           <Button type="submit" size="lg" className="grow" disabled={save.isPending}>
-            {save.isPending ? "Saving…" : item ? "Save changes" : "Add title"}
+            {save.isPending ? "Saving…" : item ? "Save changes" : "Add product"}
           </Button>
         </div>
       </form>
@@ -586,7 +586,7 @@ function PriceListUpload() {
               </Dialog.Close>
               {check && check.valid > 0 && (
                 <Button className="grow" onClick={importRows} disabled={run.isPending}>
-                  {run.isPending ? "Adding…" : `Add ${plural(check.valid, "title")}`}
+                  {run.isPending ? "Adding…" : `Add ${plural(check.valid, "product")}`}
                 </Button>
               )}
             </div>
