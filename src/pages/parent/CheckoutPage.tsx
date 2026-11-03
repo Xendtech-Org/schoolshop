@@ -1,31 +1,19 @@
 import { Link, useNavigate } from "react-router"
-import { useForm } from "react-hook-form"
-import { zodResolver } from "@hookform/resolvers/zod"
-import { Lock, Minus, Plus, School } from "lucide-react"
-import { z } from "zod"
+import { Minus, Plus, School } from "lucide-react"
 
 import { CheckoutSteps } from "@/components/common/CheckoutSteps"
+import { PayOptions } from "@/components/common/PayOptions"
 import { QueryBoundary } from "@/components/common/QueryBoundary"
 import { SectionLabel } from "@/components/common/SectionLabel"
 import { ParentPageHeader } from "@/components/layout/ParentLayout"
 import { Button } from "@/components/ui/button"
-import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
-import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
-import { ApiError } from "@/lib/api/client"
 import { useBooklist, useChildren, useCreateOrder, useProducts, useStartPayment } from "@/lib/api/queries"
 import type { Booklist, Product } from "@/lib/api/schemas"
-import { formatDay, formatKes, normaliseKenyanPhone } from "@/lib/format"
+import { formatDay, formatKes } from "@/lib/format"
 import { useAuthStore } from "@/stores/auth"
 import { useCartStore } from "@/stores/cart"
 
-const payFormSchema = z.object({
-  phone: z
-    .string()
-    .trim()
-    .refine((v) => normaliseKenyanPhone(v) !== null, "Enter the M-Pesa number, like 0712 345 678"),
-})
-type PayForm = z.infer<typeof payFormSchema>
 
 export function CheckoutPage() {
   const { booklistId } = useCartStore()
@@ -68,30 +56,19 @@ function Checkout({ list }: { list: Booklist }) {
   const extrasTotal = extras.reduce((s, e) => s + e.product.priceCents * e.qty, 0)
   const total = listTotal + extrasTotal
 
-  const form = useForm<PayForm>({
-    resolver: zodResolver(payFormSchema),
-    defaultValues: { phone: user?.phone ? user.phone.replace(/^254/, "0") : "" },
-  })
-  const busy = createOrder.isPending || startPayment.isPending
-
-  async function onSubmit({ phone }: PayForm) {
+  /** Save the order, then start paying for it. A card payer leaves for the provider's page. */
+  async function pay(how: { method: "mpesa"; phone: string } | { method: "card" }) {
     if (!cart.studentId || !cart.booklistId) return
-    try {
-      const order = await createOrder.mutateAsync({
-        studentId: cart.studentId,
-        booklistId: cart.booklistId,
-        excludedItemIds: cart.excludedItemIds,
-        extraItems: extras.map((e) => ({ productId: e.product.id, qty: e.qty })),
-      })
-      const payment = await startPayment.mutateAsync({ orderId: order.id, phone: normaliseKenyanPhone(phone)! })
-      cart.clear()
-      navigate(`/parent/orders/${order.id}/payments/${payment.id}`, { replace: true })
-    } catch (e) {
-      const err = e instanceof ApiError ? e : null
-      form.setError(err?.fieldErrors.phone ? "phone" : "root", {
-        message: err?.fieldErrors.phone?.[0] ?? err?.message ?? "Couldn't start the payment. Try again.",
-      })
-    }
+    const order = await createOrder.mutateAsync({
+      studentId: cart.studentId,
+      booklistId: cart.booklistId,
+      excludedItemIds: cart.excludedItemIds,
+      extraItems: extras.map((e) => ({ productId: e.product.id, qty: e.qty })),
+    })
+    const payment = await startPayment.mutateAsync({ orderId: order.id, ...how })
+    cart.clear()
+    if (payment.method === "card" && payment.redirectUrl) window.location.assign(payment.redirectUrl)
+    else navigate(`/parent/orders/${order.id}/payments/${payment.id}`, { replace: true })
   }
 
   return (
@@ -153,34 +130,13 @@ function Checkout({ list }: { list: Booklist }) {
           <div className="flex justify-between text-[17px] font-bold"><dt>Total</dt><dd>{formatKes(total)}</dd></div>
         </dl>
 
-        <Form {...form}>
-          <form noValidate onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col gap-3.5 rounded-2xl border bg-card p-4">
-            <SectionLabel as="span" className="text-xs">Pay with M-Pesa</SectionLabel>
-            <FormField
-              control={form.control}
-              name="phone"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>M-Pesa phone number</FormLabel>
-                  <FormControl>
-                    <Input type="tel" inputMode="tel" autoComplete="tel" {...field} />
-                  </FormControl>
-                  <FormDescription>We'll send a payment prompt to this number.</FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            {form.formState.errors.root && (
-              <p role="alert" className="text-sm font-medium text-destructive">{form.formState.errors.root.message}</p>
-            )}
-            <Button type="submit" size="lg" disabled={busy || listLines.length + extras.length === 0}>
-              {busy ? "Sending prompt…" : `Pay ${formatKes(total)} with M-Pesa`}
-            </Button>
-            <p className="flex items-center gap-2 text-[13px] text-muted-foreground">
-              <Lock className="size-3.5" aria-hidden /> Full refund for any item the publisher can't supply.
-            </p>
-          </form>
-        </Form>
+        <PayOptions
+          amountCents={total}
+          defaultPhone={user?.phone ? user.phone.replace(/^254/, "0") : ""}
+          disabled={createOrder.isPending || listLines.length + extras.length === 0}
+          onMpesa={(phone) => pay({ method: "mpesa", phone })}
+          onCard={() => pay({ method: "card" })}
+        />
         </div>
       </div>
     </>

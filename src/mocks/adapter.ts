@@ -1,5 +1,6 @@
 import { AxiosError, type AxiosAdapter, type AxiosResponse, type InternalAxiosRequestConfig } from "axios"
 
+import type { PaymentsInput } from "@/lib/api/schemas"
 import type { AdminOrder, AdminOrg, AdminPayout, AdminRefunds, AuditCategory, AuditEntry, CatalogFile, CatalogSubmission, PlatformSettings, Collection, Dispute, RefundRecord, Booklist, CatalogItem, CollectionRow, Order, Payment, PublisherPayouts, SchoolOrderDetail, StudentOrderRow } from "@/lib/api/schemas"
 import { ownerRole, permissionsFor, roleDef, type OrgType } from "@/lib/access"
 import { formatKes, normaliseKenyanPhone } from "@/lib/format"
@@ -552,6 +553,25 @@ function applySettings(section: string, body: Record<string, unknown>): string[]
       platform.support = { phone: next.phone.trim(), whatsapp: next.whatsapp.trim(), email: next.email.trim(), hours: next.hours.trim() }
       break
     }
+    case "payments": {
+      // Mock mode keeps only the last four characters of a key, like the server shows them.
+      const next = body as unknown as PaymentsInput
+      const hint = (v: string, kept: string | null) => (v ? `••••${v.slice(-4)}` : kept)
+      if (next.sasapay.merchantCode && !/^\d{3,10}$/.test(next.sasapay.merchantCode)) bad("sasapay.merchantCode", "SasaPay's merchant code is 3 to 10 digits.")
+      const p = platform.payments
+      if (next.sasapay.enabled !== p.sasapay.enabled) changes.push(`switched M-Pesa (SasaPay) ${next.sasapay.enabled ? "on" : "off"}`)
+      if (next.cardProvider !== p.cardProvider) changes.push(next.cardProvider === "none" ? "switched card payments off" : `sent card payments through ${next.cardProvider === "stripe" ? "Stripe" : "Paystack"}`)
+      platform.payments = {
+        ...p,
+        sasapay: { ...p.sasapay, enabled: next.sasapay.enabled, mode: next.sasapay.mode, merchantCode: next.sasapay.merchantCode, clientId: hint(next.sasapay.clientId, p.sasapay.clientId), clientSecret: hint(next.sasapay.clientSecret, p.sasapay.clientSecret) },
+        cardProvider: next.cardProvider,
+        stripe: { ...p.stripe, secretKey: hint(next.stripe.secretKey, p.stripe.secretKey), webhookSecret: hint(next.stripe.webhookSecret, p.stripe.webhookSecret) },
+        paystack: { ...p.paystack, secretKey: hint(next.paystack.secretKey, p.paystack.secretKey) },
+        mpesaReady: next.sasapay.enabled,
+        cardReady: next.cardProvider !== "none",
+      }
+      break
+    }
     default:
       throw notFound()
   }
@@ -960,13 +980,22 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
   ["post", "/orders/:id/payments/", ({ params, body }) => {
     const order = orders.get(params.id) ?? raise(notFound())
     if (order.status !== "pending_payment" && order.status !== "payment_failed") throw new HttpError(409, { detail: "This order is already paid." })
+    const id = `pay-${Date.now()}`
+    if (body.method === "card") {
+      // Mock mode has no card provider page: "come back" straight to the payment page, already paid.
+      const payment = { id, orderId: order.id, method: "card" as const, status: "initiated" as const, amountCents: order.totalCents, phone: null, failureReason: null, redirectUrl: `/parent/orders/${order.id}/payments/${id}`, checks: 1 }
+      payments.set(id, payment)
+      order.status = "pending_payment"
+      return strip(payment)
+    }
     const phone = String(body.phone ?? "")
-    if (!/^2547\d{8}$|^2541\d{8}$/.test(phone)) throw new HttpError(400, { phone: ["Enter a Safaricom number like 0712 345 678."] })
-    const payment = { id: `pay-${Date.now()}`, orderId: order.id, method: "mpesa" as const, status: "initiated" as const, amountCents: order.totalCents, phone, failureReason: null, checks: 0 }
+    if (!/^2547\d{8}$|^2541\d{8}$/.test(phone)) throw new HttpError(400, { phone: ["Enter a Kenyan mobile number."] })
+    const payment = { id, orderId: order.id, method: "mpesa" as const, status: "initiated" as const, amountCents: order.totalCents, phone, failureReason: null, redirectUrl: null, checks: 0 }
     payments.set(payment.id, payment)
     order.status = "pending_payment"
     return strip(payment)
   }],
+  ["get", "/payments/options/", () => ({ mpesa: true, card: true, cardProvider: "stripe" })],
   ["get", "/payments/:id/", ({ params }) => {
     const p = payments.get(params.id) ?? raise(notFound())
     p.checks += 1
@@ -980,7 +1009,7 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
         Object.assign(order, {
           status: "paid",
           paidAt: new Date().toISOString().replace("Z", "+00:00"),
-          mpesaReceipt: "QK" + Math.random().toString(36).slice(2, 10).toUpperCase(),
+          mpesaReceipt: p.method === "card" ? null : "QK" + Math.random().toString(36).slice(2, 10).toUpperCase(),
           collectionCode: String(1000 + Math.floor(Math.random() * 9000)),
         })
       }

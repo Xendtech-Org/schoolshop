@@ -135,7 +135,7 @@ function ActiveOrder({ order }: { order: Order }) {
       )}
       <div className="flex gap-2.5">
         {unpaid ? (
-          <Button asChild className="grow"><Link to={`/parent/orders/${order.id}`}>{order.status === "payment_failed" ? "Try paying again" : "Pay with M-Pesa"}</Link></Button>
+          <Button asChild className="grow"><Link to={`/parent/orders/${order.id}`}>{order.status === "payment_failed" ? "Try paying again" : "Pay now"}</Link></Button>
         ) : (
           <Button asChild variant="outline" className="grow"><Link to={`/parent/orders/${order.id}`}>Track order</Link></Button>
         )}
