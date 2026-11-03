@@ -204,6 +204,13 @@ export const removeStudent = async (id: string) => {
 export const importStudents = (rows: Omit<StudentInput, "parentName">[], dryRun: boolean) =>
   post("/school/students/import/", studentImportResultSchema, { rows, dryRun })
 /** SMS the school code to parents with a phone on file who haven't linked their child yet. */
+/** Add a class (e.g. "4 East" in Grade 4). Returns the roster. */
+export const addClass = (input: { gradeName: string; className: string }) => post("/school/classes/", classRosterSchema, input)
+/** Only a class with no students can be removed. Returns the roster. */
+export const removeClass = async (className: string) => {
+  const { data } = await api.delete(`/school/classes/${encodeURIComponent(className)}/`)
+  return classRosterSchema.parse(data)
+}
 export const inviteParents = (className: string | null) => post("/school/students/invite/", z.object({ sent: z.number().int() }), { className })
 
 export const listCollection = () => get("/school/collection/", z.array(collectionRowSchema))

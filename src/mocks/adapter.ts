@@ -98,6 +98,24 @@ function studentView(r: StudentOrderRow) {
   }
 }
 
+function rosterView() {
+    const teachers = directories.school.members.filter((m) => m.role === "teacher" && m.status !== "suspended")
+    return {
+      joinCode: "GRN-2027",
+      classes: allClasses().map(({ className, gradeName }) => {
+        const inClass = schoolRows.filter((r) => r.className === className)
+        return {
+          className,
+          gradeName,
+          teacher: teachers.find((t) => t.classNames.includes(className))?.name ?? null,
+          students: inClass.length,
+          linked: inClass.filter((r) => linked.has(r.studentId)).length,
+        }
+      }),
+      students: schoolRows.map(studentView),
+    }
+  }
+
 function createStudent(body: Record<string, unknown>) {
   const name = String(body.name ?? "").trim()
   const admissionNo = String(body.admissionNo ?? "").trim().toUpperCase()
@@ -1440,23 +1458,7 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     }
     return org
   }],
-  ["get", "/school/students/", () => {
-    const teachers = directories.school.members.filter((m) => m.role === "teacher" && m.status !== "suspended")
-    return {
-      joinCode: "GRN-2027",
-      classes: allClasses().map(({ className, gradeName }) => {
-        const inClass = schoolRows.filter((r) => r.className === className)
-        return {
-          className,
-          gradeName,
-          teacher: teachers.find((t) => t.classNames.includes(className))?.name ?? null,
-          students: inClass.length,
-          linked: inClass.filter((r) => linked.has(r.studentId)).length,
-        }
-      }),
-      students: schoolRows.map(studentView),
-    }
-  }],
+  ["get", "/school/students/", () => rosterView()],
   ["post", "/school/students/", ({ body }) => studentView(createStudent(body))],
   ["patch", "/school/students/:id/", ({ params, body }) => {
     const row = schoolRows.find((r) => r.studentId === params.id) ?? raise(notFound())
@@ -1505,6 +1507,20 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     })
     if (!body.dryRun) ok.forEach((r) => createStudent(r))
     return { valid: ok.length, created: body.dryRun ? 0 : ok.length, errors }
+  }],
+  ["post", "/school/classes/", ({ body }) => {
+    const grade = db.schoolGrades.find((g) => g.gradeName === body.gradeName) ?? (/^(PP[12]|Grade (1[0-2]|[1-9]))$/.test(String(body.gradeName)) ? (db.schoolGrades.push({ gradeName: String(body.gradeName), classNames: [], students: 0 }), db.schoolGrades.at(-1)!) : raise(new HttpError(400, { gradeName: ["Choose a grade."] })))
+    const name = String(body.className ?? "").trim().replace(/\s+/g, " ")
+    if (!name) throw new HttpError(400, { className: ["Give the class a name, like 4 East."] })
+    if (allClasses().some((c) => c.className.toLowerCase() === name.toLowerCase())) throw new HttpError(400, { className: [`There's already a class called ${name}.`] })
+    grade.classNames.push(name)
+    return rosterView()
+  }],
+  ["delete", "/school/classes/:name/", ({ params }) => {
+    const grade = db.schoolGrades.find((g) => g.classNames.includes(params.name)) ?? raise(notFound())
+    if (schoolRows.some((r) => r.className === params.name)) throw new HttpError(409, { detail: `Move or remove the students in ${params.name} first.` })
+    grade.classNames.splice(grade.classNames.indexOf(params.name), 1)
+    return rosterView()
   }],
   ["post", "/school/students/invite/", ({ body }) => {
     const targets = schoolRows.filter((r) => r.parentPhone && !linked.has(r.studentId) && (!body.className || r.className === body.className))
