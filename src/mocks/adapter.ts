@@ -1,6 +1,6 @@
 import { AxiosError, type AxiosAdapter, type AxiosResponse, type InternalAxiosRequestConfig } from "axios"
 
-import type { AdminOrder, AdminOrg, AdminPayout, Collection, Booklist, CatalogItem, CollectionRow, Order, Payment, PublisherPayouts, SchoolOrderDetail, StudentOrderRow } from "@/lib/api/schemas"
+import type { AdminOrder, AdminOrg, AdminPayout, AdminRefunds, Collection, Dispute, RefundRecord, Booklist, CatalogItem, CollectionRow, Order, Payment, PublisherPayouts, SchoolOrderDetail, StudentOrderRow } from "@/lib/api/schemas"
 import { ownerRole, permissionsFor, roleDef, type OrgType } from "@/lib/access"
 import { formatKes } from "@/lib/format"
 import * as db from "@/mocks/fixtures"
@@ -173,7 +173,7 @@ function adminOrder(o: Order): AdminOrder {
   ]
   return {
     ...o, schoolId: x.schoolId, admissionNo: (o as Partial<SchoolOrderDetail>).admissionNo ?? null, parentName: parentNameOf(o), parentPhone: display(x.parentPhone),
-    createdAt: x.createdAt, refundedCents: refundedCents(o), issue: x.issue, issueDetail: x.issueDetail,
+    createdAt: x.createdAt, refundedCents: refundedCents(o), issue: x.issue, issueDetail: x.issueDetail, refundRequest: x.refundRequest ?? null,
     payments: x.payments.map((p) => ({ ...p, phone: display(p.phone)! })),
     events: [...x.events, ...derived].sort((a, b) => b.at.localeCompare(a.at)),
   }
@@ -188,6 +188,97 @@ function logOrder(o: Order, userId: string | null, text: string) {
 function syncSchoolRow(o: Order) {
   const row = schoolRows.find((r) => r.order?.id === o.id)
   if (row?.order) row.order.status = o.status
+}
+
+/* ── Refunds and delivery disputes ── */
+
+const refundLog: RefundRecord[] = db.refundLogSeed.map((r) => ({ ...r }))
+const actorName = (userId: string | null) => usersById().find((u) => u.id === userId)?.name ?? "SchoolShop"
+
+/** Pay back items on an order to the number that paid, and close whatever asked for it. */
+function refundItems(o: Order, itemIds: string[], reason: string, userId: string | null) {
+  const x = orderExtra(o)
+  const ids = new Set(itemIds)
+  const lines = o.items.filter((i) => ids.has(i.id) && i.status !== "refunded")
+  if (!lines.length) return 0
+  for (const i of lines) i.status = "refunded"
+  const amount = lines.reduce((t, i) => t + i.unitPriceCents * i.qty, 0)
+  o.status = o.items.every((i) => i.status === "refunded") ? "refunded" : "partially_refunded"
+  if (x.issue === "refund_due" || x.issue === "short_delivery") Object.assign(x, { issue: null, issueDetail: null, refundRequest: undefined })
+  logOrder(o, userId, `refunded ${formatKes(amount)} to ${display(x.parentPhone) ?? "the parent"} for ${lines.map((i) => i.title).join(", ")}: "${reason}"`)
+  refundLog.unshift({ id: `rf-${Date.now()}-${refundLog.length}`, at: stamp(), orderId: o.id, orderNumber: o.number, schoolName: o.schoolName, phone: display(x.parentPhone), amountCents: amount, reason, actor: actorName(userId) })
+  syncSchoolRow(o)
+  return amount
+}
+
+// Greenhill's cases: two PP2 Rose packs from Moran arrived soaked, and two parents asked for money back.
+const greenhillPaid = [...schoolOrders.values()].filter((o) => ["in_fulfilment", "at_school"].includes(o.status))
+const soaked = greenhillPaid.filter((o) => o.className === "PP2 Rose" && o.items.some((i) => i.publisherName === "Moran")).slice(0, 2)
+for (const o of soaked) Object.assign(orderExtra(o), { issue: "short_delivery", issueDetail: `${o.studentName}'s Moran pack arrived soaked through and can't be used.` })
+const asking = greenhillPaid.filter((o) => o.status === "in_fulfilment" && !soaked.includes(o)).slice(0, 2)
+if (asking[0]) Object.assign(orderExtra(asking[0]), {
+  issue: "refund_due", issueDetail: `${asking[0].parentName ?? "The parent"} asked for a full refund: the family is moving to Mombasa before term starts.`,
+  refundRequest: { from: "parent", reason: "Moving to a school in Mombasa before term starts.", itemIds: asking[0].items.map((i) => i.id), requestedAt: "2027-01-13T19:20:00+03:00" },
+})
+if (asking[1]) {
+  const item = asking[1].items.find((i) => i.publisherName !== "Moran") ?? asking[1].items[0]
+  Object.assign(orderExtra(asking[1]), {
+    issue: "refund_due", issueDetail: `${asking[1].parentName ?? "The parent"} asked for ${item.title} back: they already have a copy from an older sibling.`,
+    refundRequest: { from: "parent", reason: `Already have ${item.title} from an older sibling.`, itemIds: [item.id], requestedAt: "2027-01-12T08:45:00+03:00" },
+  })
+}
+
+const disputes = new Map(db.disputeSeeds.map((d) => [d.id, {
+  ...d,
+  status: "open" as Dispute["status"], resolution: null as string | null,
+  orderIds: (d.id === "disp-greenhill" ? soaked : allOrders().filter((o) => orderExtra(o).schoolId === d.schoolId && orderExtra(o).issue === "short_delivery")).map((o) => o.id),
+  events: [{ id: "reported", at: d.reportedAt, actor: d.reportedBy, text: d.kind === "short" ? `reported the delivery ${d.packs} packs short` : `reported ${d.packs} packs damaged` }] as Dispute["events"],
+}]))
+const publisherItems = (o: Order, publisher: string) => o.items.filter((i) => i.publisherName === publisher && i.status !== "refunded")
+
+function disputeView(d: NonNullable<ReturnType<typeof disputes.get>>): Dispute {
+  const orders = d.orderIds.map(findOrder).map((o) => {
+    const lines = o.items.filter((i) => i.publisherName === d.publisherName)
+    return {
+      id: o.id, number: o.number, studentName: o.studentName, className: o.className,
+      amountCents: lines.reduce((t, i) => t + i.unitPriceCents * i.qty, 0), open: orderExtra(o).issue === "short_delivery", refunded: lines.length > 0 && lines.every((i) => i.status === "refunded"),
+    }
+  })
+  const payout = d.payoutId ? findPayout(d.payoutId) : null
+  return {
+    id: d.id, kind: d.kind, schoolName: d.schoolName, publisherName: d.publisherName, deliveryNoteNo: d.deliveryNoteNo, packs: d.packs, detail: d.detail,
+    reportedAt: d.reportedAt, reportedBy: d.reportedBy, status: d.status, resolution: d.resolution, orders,
+    refundCents: orders.filter((o) => o.open && !o.refunded).reduce((t, o) => t + o.amountCents, 0),
+    payout: payout ? { id: payout.id, status: payout.status, netCents: payout.netCents } : null,
+    events: [...d.events].sort((a, b) => b.at.localeCompare(a.at)),
+  }
+}
+
+function refundsView(): AdminRefunds {
+  const requests = allOrders().flatMap((o) => {
+    const x = orderExtra(o)
+    if (x.issue !== "refund_due" || !x.refundRequest) return []
+    const want = new Set(x.refundRequest.itemIds)
+    const items = o.items.filter((i) => want.has(i.id) && i.status !== "refunded").map((i) => ({ id: i.id, title: i.title, publisherName: i.publisherName, amountCents: i.unitPriceCents * i.qty }))
+    return [{ orderId: o.id, orderNumber: o.number, studentName: o.studentName, schoolName: o.schoolName, parentName: parentNameOf(o), parentPhone: display(x.parentPhone),
+      from: x.refundRequest.from, reason: x.refundRequest.reason, items, amountCents: items.reduce((t, i) => t + i.amountCents, 0), requestedAt: x.refundRequest.requestedAt }]
+  }).sort((a, b) => a.requestedAt.localeCompare(b.requestedAt))
+  return { requests, disputes: [...disputes.values()].map(disputeView).sort((a, b) => (a.status === b.status ? a.reportedAt.localeCompare(b.reportedAt) : a.status === "open" ? -1 : 1)), refunded: refundLog }
+}
+
+/** resolution is shown on its own ("Refunded KES 3,900 to 6 parents."); the history line reads after the actor's name. */
+function settleDispute(d: NonNullable<ReturnType<typeof disputes.get>>, resolution: string, userId: string | null) {
+  d.status = "resolved"
+  d.resolution = resolution
+  d.events.unshift({ id: `de-${Date.now()}`, at: stamp(), actor: actorName(userId), text: `settled it. ${resolution}` })
+  if (d.payoutId) {
+    const p = findPayout(d.payoutId)
+    if (p.status === "on_hold") {
+      p.status = p.receivedAt ? "queued" : "held"
+      payoutNote(p).holdReason = null
+      logPayout(p.id, userId, `took the hold off: dispute settled. ${resolution}`)
+    }
+  }
 }
 
 /* ── Payouts across every publisher. Longhorn's are the same records its own Payouts page reads. ── */
@@ -301,7 +392,8 @@ const guards: Array<[method: string, path: RegExp, orgType: OrgType, permission:
   ["get", /^\/admin\/overview\/$/, "platform", "overview.view"],
   ["get", /^\/admin\/organisations\//, "platform", "orgs.view"],
   ["post", /^\/admin\/orders\/[^/]+\/(refund|resolve)\/$/, "platform", "refunds.approve"],
-  ["get", /^\/admin\/(money|collections)\//, "platform", "money.view"],
+  ["get", /^\/admin\/(money|collections|refunds)\//, "platform", "money.view"],
+  ["post", /^\/admin\/(refunds|disputes)\//, "platform", "refunds.approve"],
   ["post", /^\/admin\/(payouts|payout-accounts)\//, "platform", "payouts.release"],
   ["*", /^\/admin\/orders\//, "platform", "orders.view"],
   ["post", /^\/admin\/organisations\//, "platform", "orgs.verify"],
@@ -813,6 +905,56 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
   }],
   ["get", "/school/orders/", () => ({ termName: db.schoolOverview.termName, orderDeadline: db.schoolOverview.orderDeadline, rows: schoolRows })],
   ["get", "/school/orders/:id/", ({ params }) => schoolOrders.get(params.id) ?? raise(notFound())],
+  ["get", "/admin/refunds/", () => refundsView()],
+  ["post", "/admin/refunds/approve/", ({ body, userId }) => {
+    const ids = (body.orderIds as string[]) ?? []
+    const orders = ids.map(findOrder)
+    const missing = orders.filter((o) => orderExtra(o).issue !== "refund_due" || !orderExtra(o).refundRequest)
+    if (!ids.length || missing.length) throw new HttpError(409, { detail: missing.length ? `No refund is waiting on ${missing.map((o) => o.number).join(", ")}.` : "Choose the refunds to approve." })
+    for (const o of orders) { const r = orderExtra(o).refundRequest!; refundItems(o, r.itemIds, r.reason, userId) }
+    return refundsView()
+  }],
+  ["post", "/admin/refunds/:orderId/decline/", ({ params, body, userId }) => {
+    const o = findOrder(params.orderId)
+    const x = orderExtra(o)
+    if (x.issue !== "refund_due" || !x.refundRequest) throw new HttpError(409, { detail: "No refund is waiting on this order." })
+    if (x.refundRequest.from === "publisher") throw new HttpError(409, { detail: "The publisher can't supply these items, so the parent has to get their money back." })
+    const reason = String(body.reason ?? "").trim()
+    if (!reason) throw new HttpError(400, { reason: ["Tell the parent why. They get this by SMS."] })
+    Object.assign(x, { issue: null, issueDetail: null, refundRequest: undefined })
+    logOrder(o, userId, `declined the refund request: "${reason}"`)
+    return refundsView()
+  }],
+  ["post", "/admin/disputes/:id/refund/", ({ params, userId }) => {
+    const d = disputes.get(params.id) ?? raise(notFound())
+    if (d.status !== "open") throw new HttpError(409, { detail: "This dispute is already settled." })
+    const open = d.orderIds.map(findOrder).filter((o) => orderExtra(o).issue === "short_delivery")
+    const reason = d.kind === "short" ? `Missing from ${d.publisherName}'s delivery to ${d.schoolName}` : `Damaged in ${d.publisherName}'s delivery to ${d.schoolName}`
+    const total = open.reduce((t, o) => t + refundItems(o, publisherItems(o, d.publisherName).map((i) => i.id), reason, userId), 0)
+    let where = ""
+    if (d.payoutId) {
+      const p = findPayout(d.payoutId)
+      if (p.status === "paid") where = ` Taken off ${d.publisherName}'s next payout.`
+      else {
+        Object.assign(p, { deductionsCents: p.deductionsCents + total, netCents: p.netCents - total, deductionNote: [p.deductionNote, `${open.length} packs ${d.kind === "short" ? "short" : "damaged"} at ${d.schoolName}, refunded to parents`].filter(Boolean).join("; ") })
+        where = ` Taken off ${d.publisherName}'s payout (${p.deliveryNoteNo}).`
+      }
+    }
+    settleDispute(d, `Refunded ${formatKes(total)} to ${open.length} parent${open.length === 1 ? "" : "s"}.${where}`, userId)
+    return refundsView()
+  }],
+  ["post", "/admin/disputes/:id/replace/", ({ params, body, userId }) => {
+    const d = disputes.get(params.id) ?? raise(notFound())
+    if (d.status !== "open") throw new HttpError(409, { detail: "This dispute is already settled." })
+    const note = String(body.note ?? "").trim()
+    if (!note) throw new HttpError(400, { note: ["Say what the publisher sent and when."] })
+    for (const o of d.orderIds.map(findOrder)) {
+      const x = orderExtra(o)
+      if (x.issue === "short_delivery") { Object.assign(x, { issue: null, issueDetail: null }); logOrder(o, userId, `marked it sorted: "${note}"`) }
+    }
+    settleDispute(d, `Replacement delivered: "${note}"`, userId)
+    return refundsView()
+  }],
   ["get", "/admin/money/", () => money()],
   ["get", "/admin/collections/", (): Collection[] =>
     allOrders()
@@ -891,19 +1033,13 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
   }],
   ["post", "/admin/orders/:id/refund/", ({ params, body, userId }) => {
     const o = findOrder(params.id)
-    const x = orderExtra(o)
     if (!o.paidAt) throw new HttpError(409, { detail: "Nothing has been paid on this order." })
     const ids = new Set((body.itemIds as string[]) ?? [])
     const lines = o.items.filter((i) => ids.has(i.id) && i.status !== "refunded")
     if (!lines.length) throw new HttpError(400, { itemIds: ["Choose what to refund."] })
     const reason = String(body.reason ?? "").trim()
     if (!reason) throw new HttpError(400, { reason: ["Give the reason. The parent sees it."] })
-    for (const i of lines) i.status = "refunded"
-    const amount = lines.reduce((t, i) => t + i.unitPriceCents * i.qty, 0)
-    o.status = o.items.every((i) => i.status === "refunded") ? "refunded" : "partially_refunded"
-    if (x.issue === "refund_due" || x.issue === "short_delivery") Object.assign(x, { issue: null, issueDetail: null })
-    logOrder(o, userId, `refunded KES ${(amount / 100).toLocaleString("en-KE")} to ${display(x.parentPhone) ?? "the parent"} for ${lines.map((i) => i.title).join(", ")}: "${reason}"`)
-    syncSchoolRow(o)
+    refundItems(o, lines.map((i) => i.id), reason, userId)
     return adminOrder(o)
   }],
   ["post", "/admin/orders/:id/resolve/", ({ params, body, userId }) => {
@@ -1119,13 +1255,15 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     const live = (t: string) => orgs.filter((o) => o.type === t && o.status === "live").length
     const waiting = (t: string) => orgs.filter((o) => o.type === t && (o.status === "pending" || o.status === "info_requested")).length
     const [schools, publishers] = [waiting("school"), waiting("publisher")]
-    const alerts = db.adminOverview.alerts.filter((a) => a.href !== "/admin/organisations" && !a.href.startsWith("/admin/orders"))
+    const alerts = db.adminOverview.alerts.filter((a) => a.href !== "/admin/organisations" && !a.href.startsWith("/admin/orders") && !a.href.startsWith("/admin/refunds") && !a.href.startsWith("/admin/payments"))
     const open = allOrders().filter((o) => orderExtra(o).issue)
     const byIssue = (i: string) => open.filter((o) => orderExtra(o).issue === i)
-    const [unconfirmed, short, refunds] = [byIssue("payment_unconfirmed"), byIssue("short_delivery"), byIssue("refund_due")]
+    const unconfirmed = byIssue("payment_unconfirmed")
     const href = "/admin/orders?show=attention"
-    if (refunds.length) alerts.unshift({ id: "al-5", severity: "info", title: `${refunds.length} refund${refunds.length === 1 ? "" : "s"} to approve`, detail: `Out-of-stock lines, KES ${(refunds.reduce((t, o) => t + o.items.filter((i) => i.status === "unavailable").reduce((s2, i) => s2 + i.unitPriceCents * i.qty, 0), 0) / 100).toLocaleString("en-KE")}`, href })
-    if (short.length) alerts.unshift({ id: "al-4", severity: "medium", title: "1 short-delivery dispute", detail: `${short[0].schoolName} · Moran · ${short.length} pack${short.length === 1 ? "" : "s"}`, href })
+    const { requests, disputes: allDisputes } = refundsView()
+    const openDisputes = allDisputes.filter((d) => d.status === "open")
+    if (requests.length) alerts.unshift({ id: "al-5", severity: "info", title: `${requests.length} refund${requests.length === 1 ? "" : "s"} to approve`, detail: `${formatKes(requests.reduce((t, r) => t + r.amountCents, 0))} back to parents`, href: "/admin/refunds" })
+    if (openDisputes.length) alerts.unshift({ id: "al-4", severity: "medium", title: `${openDisputes.length} delivery dispute${openDisputes.length === 1 ? "" : "s"}`, detail: openDisputes.map((d) => `${d.schoolName} · ${d.publisherName} · ${d.packs} packs`).join("; "), href: "/admin/refunds?tab=disputes" })
     if (unconfirmed.length) alerts.unshift({ id: "al-3", severity: "medium", title: `${unconfirmed.length} M-Pesa payment${unconfirmed.length === 1 ? "" : "s"} not confirmed`, detail: "No callback after 2 minutes, status check queued", href })
     if (publishers) alerts.unshift({ id: "al-2", severity: "high", title: `${publishers} publisher application${publishers === 1 ? "" : "s"}`, detail: "Documents uploaded", href: "/admin/organisations" })
     if (schools) alerts.unshift({ id: "al-1", severity: "high", title: `${schools} school${schools === 1 ? "" : "s"} waiting for verification`, detail: "Oldest: 4 days ago", href: "/admin/organisations" })

@@ -631,6 +631,14 @@ export const adminOrderSummarySchema = z.object({
 })
 export type AdminOrderSummary = z.infer<typeof adminOrderSummarySchema>
 
+/** Who asked for money back on an order, why, and for which items. */
+export const refundRequestSchema = z.object({
+  from: z.enum(["publisher", "parent"]),
+  reason: z.string(),
+  itemIds: z.array(z.string()),
+  requestedAt: isoDateTime,
+})
+
 export const adminOrderSchema = orderSchema.extend({
   schoolId: z.string(),
   admissionNo: z.string().nullable(),
@@ -640,6 +648,7 @@ export const adminOrderSchema = orderSchema.extend({
   refundedCents: cents,
   issue: orderIssueSchema.nullable(),
   issueDetail: z.string().nullable(),
+  refundRequest: refundRequestSchema.nullable(),
   payments: z.array(
     z.object({
       id: z.string(),
@@ -655,6 +664,62 @@ export const adminOrderSchema = orderSchema.extend({
   events: z.array(z.object({ id: z.string(), at: isoDateTime, actor: z.string(), text: z.string() })),
 })
 export type AdminOrder = z.infer<typeof adminOrderSchema>
+
+export const refundQueueItemSchema = z.object({
+  orderId: z.string(),
+  orderNumber: z.string(),
+  studentName: z.string(),
+  schoolName: z.string(),
+  parentName: z.string().nullable(),
+  parentPhone: z.string().nullable(),
+  from: z.enum(["publisher", "parent"]),
+  reason: z.string(),
+  items: z.array(z.object({ id: z.string(), title: z.string(), publisherName: z.string(), amountCents: cents })),
+  amountCents: cents,
+  requestedAt: isoDateTime,
+})
+export type RefundQueueItem = z.infer<typeof refundQueueItemSchema>
+
+/** A school says a publisher's delivery came short or damaged. Settled by refunding parents or a replacement. */
+export const disputeSchema = z.object({
+  id: z.string(),
+  kind: z.enum(["short", "damaged"]),
+  schoolName: z.string(),
+  publisherName: z.string(),
+  deliveryNoteNo: z.string(),
+  packs: z.number().int(),
+  detail: z.string(),
+  reportedAt: isoDateTime,
+  reportedBy: z.string(),
+  status: z.enum(["open", "resolved"]),
+  resolution: z.string().nullable(),
+  /** Parents' orders missing the publisher's items, with what refunding them would cost. */
+  orders: z.array(z.object({ id: z.string(), number: z.string(), studentName: z.string(), className: z.string(), amountCents: cents, open: z.boolean(), refunded: z.boolean() })),
+  refundCents: cents,
+  payout: z.object({ id: z.string(), status: z.enum(["held", "on_hold", "queued", "paid"]), netCents: cents }).nullable(),
+  events: z.array(z.object({ id: z.string(), at: isoDateTime, actor: z.string(), text: z.string() })),
+})
+export type Dispute = z.infer<typeof disputeSchema>
+
+export const refundRecordSchema = z.object({
+  id: z.string(),
+  at: isoDateTime,
+  orderId: z.string().nullable(),
+  orderNumber: z.string(),
+  schoolName: z.string(),
+  phone: z.string().nullable(),
+  amountCents: cents,
+  reason: z.string(),
+  actor: z.string(),
+})
+export type RefundRecord = z.infer<typeof refundRecordSchema>
+
+export const adminRefundsSchema = z.object({
+  requests: z.array(refundQueueItemSchema),
+  disputes: z.array(disputeSchema),
+  refunded: z.array(refundRecordSchema),
+})
+export type AdminRefunds = z.infer<typeof adminRefundsSchema>
 
 export const orgStatusSchema = z.enum(["pending", "info_requested", "live", "suspended", "rejected"])
 export type OrgStatus = z.infer<typeof orgStatusSchema>

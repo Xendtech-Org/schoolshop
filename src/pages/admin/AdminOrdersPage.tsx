@@ -43,7 +43,7 @@ const PAGE = 25
 
 const issueLabel: Record<OrderIssue, string> = {
   payment_unconfirmed: "M-Pesa not confirmed",
-  short_delivery: "Short delivery",
+  short_delivery: "Delivery problem",
   refund_due: "Refund to approve",
 }
 
@@ -268,7 +268,11 @@ function OrderDetail({ order: o }: { order: AdminOrder }) {
                 <Smartphone aria-hidden /> Check with M-Pesa
               </Button>
             )}
-            {o.issue === "refund_due" && mayRefund && <Button size="sm" onClick={() => startRefund((i) => i.status === "unavailable")}><RotateCcw aria-hidden /> Refund out-of-stock items</Button>}
+            {o.issue === "refund_due" && mayRefund && (
+              <Button size="sm" onClick={() => startRefund((i) => (o.refundRequest ? o.refundRequest.itemIds.includes(i.id) : i.status === "unavailable"))}>
+                <RotateCcw aria-hidden /> {o.refundRequest?.from === "parent" ? "Refund what they asked for" : "Refund out-of-stock items"}
+              </Button>
+            )}
             {o.issue === "short_delivery" && mayRefund && (
               <>
                 <Button size="sm" onClick={() => startRefund((i) => i.publisherName === "Moran")}><RotateCcw aria-hidden /> Refund missing items</Button>
@@ -385,7 +389,7 @@ function Fact({ term, value, sub }: { term: string; value: string; sub?: string 
 }
 
 function RefundForm({ order: o, selected, onCancel, onDone }: { order: AdminOrder; selected: Set<string>; onCancel: () => void; onDone: (text: string) => void }) {
-  const [reason, setReason] = useState(o.issue === "refund_due" ? "Out of stock at the publisher." : o.issue === "short_delivery" ? "Missing from the school's delivery." : "")
+  const [reason, setReason] = useState(o.refundRequest?.reason ?? (o.issue === "short_delivery" ? "Missing or damaged in the school's delivery." : ""))
   const [error, setError] = useState<string | null>(null)
   const refund = useAdminOrderMutation((v: { ids: string[]; reason: string }) => endpoints.refundOrderItems(o.id, v.ids, v.reason))
   const amount = o.items.filter((i) => selected.has(i.id)).reduce((t, i) => t + i.unitPriceCents * i.qty, 0)

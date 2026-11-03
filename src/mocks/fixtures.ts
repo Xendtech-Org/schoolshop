@@ -700,6 +700,7 @@ export type AdminOrderExtra = {
   events: AdminOrder["events"]
   /** Mock only: what M-Pesa answers when an admin checks an unconfirmed payment. */
   confirmsOnCheck?: boolean
+  refundRequest?: AdminOrder["refundRequest"]
 }
 
 /*
@@ -782,9 +783,27 @@ export const adminOrderExtras: Record<string, AdminOrderExtra> = {}
   // The atlas sold out at Mentor after these were paid: refund the atlas, keep the rest.
   for (let i = 0; i < 6; i++) {
     const id = make(schools[i % 2], "in_fulfilment", { lines: [shelf[0], shelf[1], shelf[7]], itemStatus: (t) => (t === "Kenya Primary Atlas" ? "unavailable" : "active") })
-    Object.assign(adminOrderExtras[id], { issue: "refund_due", issueDetail: "Mentor Publishers can't supply Kenya Primary Atlas. Refund KES 1,330 to the parent.", events: [{ id: `${id}-e1`, at: ago(60 * 5), actor: "Mentor Publishers", text: "marked Kenya Primary Atlas out of stock" }] })
+    Object.assign(adminOrderExtras[id], {
+      issue: "refund_due", issueDetail: "Mentor Publishers can't supply Kenya Primary Atlas. Refund KES 1,330 to the parent.",
+      refundRequest: { from: "publisher", reason: "Kenya Primary Atlas is out of stock at Mentor Publishers.", itemIds: adminExtraOrders.at(-1)!.items.filter((it) => it.status === "unavailable").map((it) => it.id), requestedAt: ago(60 * 5) },
+      events: [{ id: `${id}-e1`, at: ago(60 * 5), actor: "Mentor Publishers", text: "marked Kenya Primary Atlas out of stock" }],
+    })
   }
 }
+
+/** Deliveries a school has disputed. The adapter links each to the affected parents' orders and the publisher's payout. */
+export const disputeSeeds = [
+  { id: "disp-hillcrest", kind: "short" as const, schoolId: "sch-hillcrest", schoolName: "Hillcrest Prep", publisherName: "Moran", deliveryNoteNo: "DN-2101", packs: 6, payoutId: "apo-2",
+    detail: "Moran's delivery arrived 6 Primary Science Activities packs short for 5 Green.", reportedAt: "2027-01-13T08:00:00+03:00", reportedBy: "Hillcrest Prep office" },
+  { id: "disp-greenhill", kind: "damaged" as const, schoolId: "sch-greenhill", schoolName: "Greenhill Academy", publisherName: "Moran", deliveryNoteNo: "DN-2100", packs: 2, payoutId: "apo-1",
+    detail: "2 PP2 Rose packs soaked through, books unusable. Replacements requested.", reportedAt: "2027-01-09T14:05:00+03:00", reportedBy: "Grace Wambui" },
+]
+
+/** Refunds already paid this term, before the demo starts: Sunrise's short Longhorn delivery. */
+export const refundLogSeed = Array.from({ length: 6 }, (_, i) => ({
+  id: `rf-seed-${i + 1}`, at: `2027-01-06T1${i < 3 ? 2 : 3}:${String(10 + i * 7).padStart(2, "0")}:00+03:00`, orderId: null, orderNumber: `SS-1870${i + 2}`, schoolName: "Sunrise Academy",
+  phone: null, amountCents: k(600), reason: "Social Studies Grade 4 missing from Longhorn's delivery", actor: "Kevin Mutai",
+}))
 
 /*
  * Every school and publisher, as SchoolShop admins see them: 41 live schools,
