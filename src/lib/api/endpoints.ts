@@ -371,10 +371,13 @@ export const decideOrg = (id: string, decision: OrgDecision, note: string) =>
   post(`/admin/organisations/${id}/${decision}/`, adminOrgSchema, { note })
 export const setOrgCheck = (id: string, checkId: string, state: "verified" | "failed") =>
   post(`/admin/organisations/${id}/checks/${checkId}/`, adminOrgSchema, { state })
-/** An applicant's document, for SchoolShop staff. Fetched with the token, then saved. */
-export async function downloadOrgDocument(orgId: string, checkId: string, name: string) {
+/** An applicant's document, for SchoolShop staff. Private, so it's fetched with the signed-in person's token. */
+export async function fetchOrgDocument(orgId: string, checkId: string) {
   const { data } = await api.get(`/admin/organisations/${orgId}/checks/${checkId}/file/`, { responseType: "blob" })
-  const href = URL.createObjectURL(data as Blob)
+  return data as Blob
+}
+export async function downloadOrgDocument(orgId: string, checkId: string, name: string) {
+  const href = URL.createObjectURL(await fetchOrgDocument(orgId, checkId))
   Object.assign(document.createElement("a"), { href, download: name }).click()
   setTimeout(() => URL.revokeObjectURL(href), 1_000)
 }
