@@ -1,8 +1,9 @@
+import { useState } from "react"
 import { useForm, useWatch } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useMutation } from "@tanstack/react-query"
 import { Link, useSearchParams } from "react-router"
-import { Check } from "lucide-react"
+import { Check, FileText, Paperclip, X } from "lucide-react"
 import { z } from "zod"
 
 import { PasswordInput } from "@/components/auth/PasswordInput"
@@ -14,7 +15,8 @@ import { Input } from "@/components/ui/input"
 import { NativeSelect } from "@/components/ui/select"
 import { ApiError } from "@/lib/api/client"
 import { applyForOrganisation, type OrgApplicationInput } from "@/lib/api/endpoints"
-import { normaliseKenyanPhone } from "@/lib/format"
+import { formatBytes, normaliseKenyanPhone } from "@/lib/format"
+import { orgDocumentAccept, orgDocumentMaxBytes, orgDocuments } from "@/lib/orgDocuments"
 import { newPasswordSchema } from "@/lib/password"
 import { cn } from "@/lib/utils"
 
@@ -63,8 +65,10 @@ export function RegisterOrganisationPage() {
     resolver: zodResolver(schema),
     defaultValues: { orgName: "", county: "", registrationNo: "", contactName: "", contactRole: "", email: "", phone: "", password: "" },
   })
+  const [docs, setDocs] = useState<Record<string, File | null>>({})
+  const [docError, setDocError] = useState<string | null>(null)
   const apply = useMutation({
-    mutationFn: (input: OrgApplicationInput) => applyForOrganisation(input),
+    mutationFn: ({ input, files }: { input: OrgApplicationInput; files: Record<string, File | null> }) => applyForOrganisation(input, files),
     onError: (e) => {
       if (e instanceof ApiError && Object.keys(e.fieldErrors).length) {
         for (const [field, messages] of Object.entries(e.fieldErrors)) {
@@ -95,11 +99,16 @@ export function RegisterOrganisationPage() {
           <h1 className="text-[28px] leading-tight font-semibold">Application received</h1>
           <p className="text-muted-foreground">
             Thanks. We'll review <span className="font-semibold text-ink">{apply.data.orgName}</span> and email{" "}
-            <span className="font-semibold break-all text-ink">{apply.variables.email}</span>, usually within 2 working days.
+            <span className="font-semibold break-all text-ink">{apply.variables.input.email}</span>, usually within 2 working days.
           </p>
           <ol className="flex w-full flex-col gap-2 rounded-2xl bg-paper p-4 text-sm text-ink/85">
-            <li>1. We may call {apply.variables.contactName.split(" ")[0]} to confirm details.</li>
-            <li>2. Once verified, you can sign in with this email and password.</li>
+            <li>1. We'll call {apply.variables.input.contactName.split(" ")[0]} on {apply.variables.input.phone.replace(/^254/, "0")} to confirm details.</li>
+            <li>
+              2. {sentCount(apply.variables.files) === orgDocuments[orgType].length
+                ? "We have all your documents."
+                : "We've texted you a link to send any documents you haven't sent yet."}
+            </li>
+            <li>3. Once verified, you can sign in with this email and password.</li>
           </ol>
           <Button asChild size="lg" variant="outline" className="w-full">
             <Link to="/">Back to SchoolShop</Link>
@@ -115,7 +124,7 @@ export function RegisterOrganisationPage() {
         <form
           noValidate
           className="flex flex-col gap-4"
-          onSubmit={form.handleSubmit((v) => apply.mutate({ ...v, orgType, phone: normaliseKenyanPhone(v.phone)! }))}
+          onSubmit={form.handleSubmit((v) => apply.mutate({ input: { ...v, orgType, phone: normaliseKenyanPhone(v.phone)! }, files: docs }))}
         >
           <AuthHeading title="Register your organisation">Parents don't need this. They can sign up on their phone.</AuthHeading>
 
@@ -126,7 +135,11 @@ export function RegisterOrganisationPage() {
                 type="button"
                 role="tab"
                 aria-selected={t === orgType}
-                onClick={() => setParams({ type: t }, { replace: true })}
+                onClick={() => {
+                  setParams({ type: t }, { replace: true })
+                  setDocs({})
+                  setDocError(null)
+                }}
                 className={cn(
                   "h-10 rounded-[9px] px-2 text-sm font-semibold",
                   t === orgType ? "bg-surface text-ink shadow-xs" : "text-muted-foreground hover:text-ink"
@@ -250,6 +263,29 @@ export function RegisterOrganisationPage() {
               </FormItem>
             )}
           />
+          <fieldset className="flex flex-col gap-3 rounded-2xl border p-4">
+            <legend className="px-1 text-sm font-semibold">Documents <span className="font-normal text-muted-foreground">(optional now)</span></legend>
+            <p className="text-sm text-muted-foreground">
+              We check these before you go live. Send what you have; we'll text you a link for the rest. PDF, photo, CSV or Excel, up to 10 MB each.
+            </p>
+            {orgDocuments[orgType].map((d) => (
+              <DocumentPicker
+                key={`${orgType}-${d.key}`}
+                label={d.label}
+                hint={"hint" in d ? d.hint : undefined}
+                file={docs[d.key] ?? null}
+                onChange={(file) => {
+                  setDocError(null)
+                  if (file && file.size > orgDocumentMaxBytes) {
+                    setDocError(`${file.name} is over 10 MB. Save a smaller copy and choose that.`)
+                    return
+                  }
+                  setDocs((prev) => ({ ...prev, [d.key]: file }))
+                }}
+              />
+            ))}
+            {docError && <p role="alert" className="text-sm font-medium text-destructive">{docError}</p>}
+          </fieldset>
           {form.formState.errors.root && (
             <p role="alert" className="text-sm font-medium text-destructive">{form.formState.errors.root.message}</p>
           )}
@@ -266,3 +302,38 @@ export function RegisterOrganisationPage() {
   )
 }
 
+const sentCount = (files: Record<string, File | null>) => Object.values(files).filter(Boolean).length
+
+function DocumentPicker({ label, hint, file, onChange }: { label: string; hint?: string; file: File | null; onChange: (file: File | null) => void }) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl bg-paper px-3 py-2.5">
+      <FileText className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+      <span className="flex min-w-0 grow flex-col">
+        <span className="text-sm font-medium">{label}</span>
+        <span className="truncate text-[13px] text-muted-foreground">{file ? `${file.name} · ${formatBytes(file.size)}` : (hint ?? "Not chosen yet")}</span>
+      </span>
+      {file ? (
+        <Button type="button" variant="ghost" size="sm" aria-label={`Remove ${label}`} onClick={() => onChange(null)}>
+          <X aria-hidden />
+        </Button>
+      ) : (
+        <Button type="button" variant="outline" size="sm" asChild>
+          <label className="cursor-pointer">
+            <Paperclip aria-hidden /> Choose
+            <input
+              type="file"
+              accept={orgDocumentAccept}
+              className="sr-only"
+              aria-label={label}
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                e.target.value = ""
+                if (f) onChange(f)
+              }}
+            />
+          </label>
+        </Button>
+      )}
+    </div>
+  )
+}

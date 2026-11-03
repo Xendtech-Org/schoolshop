@@ -33,7 +33,8 @@ const schoolNav: DashboardNavItem[] = [
 ]
 
 const publisherNav: DashboardNavItem[] = [
-  { to: "/publisher", label: "School orders", end: true, permission: "orders.view" },
+  { to: "/publisher", label: "Overview", end: true, permission: "orders.view" },
+  { to: "/publisher/orders", label: "School orders", permission: "orders.view" },
   { to: "/publisher/catalog", label: "Catalog & stock", permission: "catalog.manage" },
   { to: "/publisher/dispatches", label: "Dispatches", permission: "dispatch.manage" },
   { to: "/publisher/payouts", label: "Payouts", permission: "payouts.view" },
@@ -71,6 +72,7 @@ export const router = createBrowserRouter([
   { path: "forgot-password", element: <ForgotPasswordPage /> },
   { path: "reset-password", element: <ResetPasswordPage /> },
   { path: "register", element: <RegisterOrganisationPage /> },
+  { path: "register/documents", lazy: page(() => import("@/pages/auth/ApplicationDocumentsPage"), "ApplicationDocumentsPage") },
   {
     path: "parent",
     element: <RequireRole roles={["parent"]} />,
@@ -118,7 +120,8 @@ export const router = createBrowserRouter([
       {
         element: <DashboardLayout nav={publisherNav} tone="dark" tag="PUBLISHER" />,
         children: [
-          { index: true, lazy: page(() => import("@/pages/publisher/PublisherOrdersPage"), "PublisherOrdersPage") },
+          { index: true, lazy: page(() => import("@/pages/publisher/PublisherOverviewPage"), "PublisherOverviewPage") },
+          { path: "orders", lazy: page(() => import("@/pages/publisher/PublisherOrdersPage"), "PublisherOrdersPage") },
           { path: "catalog", lazy: page(() => import("@/pages/publisher/PublisherCatalogPage"), "PublisherCatalogPage") },
           { path: "dispatches", lazy: page(() => import("@/pages/publisher/PublisherDispatchesPage"), "PublisherDispatchesPage") },
           { path: "payouts", lazy: page(() => import("@/pages/publisher/PublisherPayoutsPage"), "PublisherPayoutsPage") },

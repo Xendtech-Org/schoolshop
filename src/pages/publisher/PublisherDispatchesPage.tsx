@@ -157,7 +157,7 @@ function ReadyCard({ batch, onDispatch }: { batch: SchoolBatch; onDispatch: () =
           <Truck aria-hidden /> Dispatch
         </Button>
         <Button asChild variant="outline">
-          <Link to="/publisher">Pick list &amp; labels</Link>
+          <Link to="/publisher/orders">Pick list &amp; labels</Link>
         </Button>
       </div>
     </article>

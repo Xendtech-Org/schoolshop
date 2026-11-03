@@ -15,8 +15,12 @@ import {
   adminOrgSchema,
   adminOrgSummarySchema,
   adminOverviewSchema,
+  publisherOverviewSchema,
+  applicationDocumentsSchema,
   authTokensSchema,
   booklistSchema,
+  catalogDeleteResultSchema,
+  catalogImportResultSchema,
   catalogItemSchema,
   childSchema,
   codeSentSchema,
@@ -95,9 +99,30 @@ export type OrgApplicationInput = {
   phone: string
   password: string
 }
-/** School or publisher sign-up. Lands in the platform admin verification queue. */
-export const applyForOrganisation = (input: OrgApplicationInput) =>
-  post("/organisations/applications/", orgApplicationSchema, input)
+/**
+ * School or publisher sign-up. Lands in the platform admin verification queue.
+ * Documents (optional) go with it as files, keyed like "kra_pin" (see lib/orgDocuments).
+ */
+export async function applyForOrganisation(input: OrgApplicationInput, documents: Record<string, File | null | undefined> = {}) {
+  const files = Object.entries(documents).filter((e): e is [string, File] => !!e[1])
+  if (!files.length) return post("/organisations/applications/", orgApplicationSchema, input)
+  const form = new FormData()
+  for (const [key, value] of Object.entries(input)) form.append(key, String(value))
+  for (const [key, file] of files) form.append(`documents.${key}`, file)
+  const { data } = await api.post("/organisations/applications/", form)
+  return orgApplicationSchema.parse(data)
+}
+/** The applicant's documents page, opened from the link SchoolShop texts them. No sign-in. */
+export const getApplicationDocuments = (token: string) =>
+  get("/organisations/applications/documents/", applicationDocumentsSchema, { token })
+export async function sendApplicationDocument(token: string, key: string, file: File) {
+  const form = new FormData()
+  form.append("token", token)
+  form.append("key", key)
+  form.append("file", file)
+  const { data } = await api.post("/organisations/applications/documents/", form)
+  return applicationDocumentsSchema.parse(data)
+}
 export const getMe = () => get("/me/", userSchema)
 
 // Public
@@ -213,7 +238,7 @@ export const remindParents = (studentIds: string[]) =>
   post("/school/orders/remind/", remindResultSchema, { studentIds })
 
 // Publisher
-export type CatalogItemInput = Omit<z.infer<typeof catalogItemSchema>, "id" | "schoolListCount">
+export type CatalogItemInput = Omit<z.infer<typeof catalogItemSchema>, "id" | "schoolListCount" | "coverUrl" | "files" | "review">
 export const listCatalog = () => get("/publisher/catalog/", z.array(catalogItemSchema))
 export const createCatalogItem = (input: CatalogItemInput) =>
   post("/publisher/catalog/", catalogItemSchema, input)
@@ -221,6 +246,43 @@ export const updateCatalogItem = async (id: string, input: Partial<CatalogItemIn
   const { data } = await api.patch(`/publisher/catalog/${id}/`, input)
   return catalogItemSchema.parse(data)
 }
+/** Products on a school's booklist are kept and listed in the result. */
+export const deleteCatalogItems = (ids: string[]) => post("/publisher/catalog/delete/", catalogDeleteResultSchema, { ids })
+
+async function upload<T extends z.ZodType>(url: string, schema: T, fields: Record<string, string | Blob>) {
+  const form = new FormData()
+  for (const [key, value] of Object.entries(fields)) form.append(key, value)
+  const { data } = await api.post(url, form)
+  return schema.parse(data) as z.infer<T>
+}
+
+/** JPG, PNG or WebP, up to 5 MB. Replaces any earlier cover. */
+export const uploadCover = (id: string, file: File) => upload(`/publisher/catalog/${id}/cover/`, catalogItemSchema, { file })
+export const removeCover = async (id: string) => {
+  const { data } = await api.delete(`/publisher/catalog/${id}/cover/`)
+  return catalogItemSchema.parse(data)
+}
+export type CatalogFileKind = "document" | "resource"
+/** document: PDF, JPG or PNG up to 10 MB, for SchoolShop's review. resource: up to 50 MB, comes with the title. */
+export const uploadCatalogFile = (id: string, input: { kind: CatalogFileKind; label: string; file: File }) =>
+  upload(`/publisher/catalog/${id}/files/`, catalogItemSchema, input)
+export const removeCatalogFile = async (id: string, fileId: string) => {
+  const { data } = await api.delete(`/publisher/catalog/${id}/files/${fileId}/`)
+  return catalogItemSchema.parse(data)
+}
+/** Files aren't public, so they're fetched with the signed-in person's token and saved from memory. */
+export async function downloadCatalogFile(fileId: string, name: string) {
+  const { data } = await api.get(`/catalog/files/${fileId}/`, { responseType: "blob" })
+  const href = URL.createObjectURL(data as Blob)
+  const a = Object.assign(document.createElement("a"), { href, download: name })
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(href), 1_000)
+}
+/** A CSV price list. dryRun checks every row and saves nothing; otherwise the good rows are added as drafts. */
+export const importPriceList = (file: File, dryRun: boolean) =>
+  upload("/publisher/catalog/import/", catalogImportResultSchema, { file, dryRun: String(dryRun) })
+
+export const getPublisherOverview = () => get("/publisher/overview/", publisherOverviewSchema)
 export const listPublisherBatches = () => get("/publisher/batches/", z.array(schoolBatchSchema))
 export type DispatchInput = {
   carrier: string
@@ -311,6 +373,16 @@ export const decideOrg = (id: string, decision: OrgDecision, note: string) =>
   post(`/admin/organisations/${id}/${decision}/`, adminOrgSchema, { note })
 export const setOrgCheck = (id: string, checkId: string, state: "verified" | "failed") =>
   post(`/admin/organisations/${id}/checks/${checkId}/`, adminOrgSchema, { state })
+/** An applicant's document, for SchoolShop staff. Private, so it's fetched with the signed-in person's token. */
+export async function fetchOrgDocument(orgId: string, checkId: string) {
+  const { data } = await api.get(`/admin/organisations/${orgId}/checks/${checkId}/file/`, { responseType: "blob" })
+  return data as Blob
+}
+export async function downloadOrgDocument(orgId: string, checkId: string, name: string) {
+  const href = URL.createObjectURL(await fetchOrgDocument(orgId, checkId))
+  Object.assign(document.createElement("a"), { href, download: name }).click()
+  setTimeout(() => URL.revokeObjectURL(href), 1_000)
+}
 export const inviteOrg = (input: { type: "school" | "publisher"; name: string; contact: string }) =>
   post("/admin/organisations/invite/", z.object({ sent: z.boolean() }), input)
 

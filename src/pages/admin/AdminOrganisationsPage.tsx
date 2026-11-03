@@ -1,9 +1,10 @@
-import { useDeferredValue, useRef, useState } from "react"
+import { useDeferredValue, useEffect, useRef, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
+import { useQuery } from "@tanstack/react-query"
 import { useSearchParams } from "react-router"
 import { Dialog } from "radix-ui"
-import { AlertTriangle, Building2, CheckCircle2, ChevronLeft, CircleDashed, FileText, Search, Send, X, XCircle } from "lucide-react"
+import { AlertTriangle, CheckCircle2, ChevronLeft, CircleDashed, Download, FileText, Search, Send, X, XCircle } from "lucide-react"
 import { z } from "zod"
 
 import { PageHeader } from "@/components/common/PageHeader"
@@ -377,7 +378,6 @@ function DocumentDialog({ org, check, allowed, onClose }: { org: AdminOrg; check
   const [error, setError] = useState<string | null>(null)
   const set = (state: "verified" | "failed") =>
     check && mark.mutate({ checkId: check.id, state }, { onSuccess: () => { setError(null); onClose() }, onError: (e) => setError(errorText(e)) })
-  const isCsv = check?.fileName?.endsWith(".csv")
   return (
     <Dialog.Root open={!!check} onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
@@ -392,20 +392,7 @@ function DocumentDialog({ org, check, allowed, onClose }: { org: AdminOrg; check
                 </div>
                 <Dialog.Close asChild><Button variant="ghost" size="icon" aria-label="Close"><X aria-hidden /></Button></Dialog.Close>
               </div>
-              <figure className="flex flex-col gap-3 rounded-xl border bg-secondary/50 p-4">
-                <figcaption className="flex items-center gap-2 text-sm font-medium"><FileText className="size-4 shrink-0" aria-hidden /> <span className="truncate">{check.fileName}</span></figcaption>
-                <div aria-hidden className="flex flex-col gap-2 rounded-lg bg-surface p-4">
-                  {isCsv ? (
-                    Array.from({ length: 5 }, (_, i) => <div key={i} className="grid grid-cols-3 gap-2">{[0, 1, 2].map((j) => <span key={j} className={cn("h-2 rounded bg-line-strong/50", i === 0 && "bg-ink/40")} />)}</div>)
-                  ) : (
-                    <>
-                      <Building2 className="mx-auto size-8 text-muted-foreground" />
-                      <span className="mx-auto h-2.5 w-2/3 rounded bg-ink/30" />
-                      {[90, 75, 85, 60].map((w) => <span key={w} className="h-2 rounded bg-line-strong/50" style={{ width: `${w}%` }} />)}
-                    </>
-                  )}
-                </div>
-              </figure>
+              <DocumentPreview org={org} check={check} />
               <dl className="grid grid-cols-2 gap-3 text-sm">
                 <Fact term="Name on application" value={org.name} />
                 <Fact term={check.label.includes("KRA") ? "KRA PIN given" : org.type === "school" ? "MOE number given" : "Registration given"} value={check.label.includes("KRA") ? org.kraPin : org.registrationNo} />
@@ -422,6 +409,48 @@ function DocumentDialog({ org, check, allowed, onClose }: { org: AdminOrg; check
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  )
+}
+
+/** The file the applicant sent: shown when the browser can (images, PDFs), and always downloadable. */
+function DocumentPreview({ org, check }: { org: AdminOrg; check: OrgCheck }) {
+  const blob = useQuery({
+    queryKey: ["org-document", org.id, check.id, check.uploadedAt],
+    queryFn: () => endpoints.fetchOrgDocument(org.id, check.id),
+    enabled: check.hasFile,
+    staleTime: Infinity,
+  })
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    if (!blob.data) return
+    const href = URL.createObjectURL(blob.data)
+    setUrl(href)
+    return () => URL.revokeObjectURL(href)
+  }, [blob.data])
+
+  if (!check.hasFile) {
+    return (
+      <p className="flex items-start gap-2 rounded-xl border bg-secondary/50 p-4 text-sm">
+        <FileText className="mt-0.5 size-4 shrink-0" aria-hidden />
+        <span>{check.fileName ?? "Nothing sent yet."}{/phone/i.test(check.label) && check.state !== "verified" ? ` Call ${org.contactName} on ${org.contactPhone.replace(/^254/, "0")}, then mark it as checked.` : ""}</span>
+      </p>
+    )
+  }
+  const type = blob.data?.type ?? ""
+  return (
+    <figure className="flex flex-col gap-3 rounded-xl border bg-secondary/50 p-4">
+      <figcaption className="flex items-center justify-between gap-2 text-sm font-medium">
+        <span className="flex min-w-0 items-center gap-2"><FileText className="size-4 shrink-0" aria-hidden /> <span className="truncate">{check.fileName}</span></span>
+        <Button variant="outline" size="sm" onClick={() => void endpoints.downloadOrgDocument(org.id, check.id, check.fileName ?? "document")}>
+          <Download aria-hidden /> Download
+        </Button>
+      </figcaption>
+      {blob.isPending && <p className="text-sm text-muted-foreground">Opening…</p>}
+      {blob.isError && <p role="alert" className="text-sm text-destructive">Couldn't open the file. Try downloading it.</p>}
+      {url && type.startsWith("image/") && <img src={url} alt={`${check.label} sent by ${org.name}`} className="max-h-[50vh] w-full rounded-lg bg-surface object-contain" />}
+      {url && type === "application/pdf" && <iframe src={url} title={check.label} className="h-[50vh] w-full rounded-lg bg-surface" />}
+      {url && !type.startsWith("image/") && type !== "application/pdf" && <p className="text-sm text-muted-foreground">This type of file can't be shown here. Download it to open it.</p>}
+    </figure>
   )
 }
 

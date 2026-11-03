@@ -63,6 +63,19 @@ export const orgApplicationSchema = z.object({
 })
 export type OrgApplication = z.infer<typeof orgApplicationSchema>
 
+/** The applicant's own view of their documents, from the link SchoolShop texts them. */
+export const applicationDocumentsSchema = z.object({
+  orgName: z.string(),
+  orgType: z.enum(["school", "publisher"]),
+  status: z.enum(["pending", "info_requested", "live", "suspended", "rejected"]),
+  /** False once SchoolShop has decided: nothing more to send. */
+  open: z.boolean(),
+  documents: z.array(
+    z.object({ key: z.string(), label: z.string(), state: z.enum(["verified", "uploaded", "missing", "failed"]), fileName: z.string().nullable(), canUpload: z.boolean() })
+  ),
+})
+export type ApplicationDocuments = z.infer<typeof applicationDocumentsSchema>
+
 export const schoolSchema = z.object({
   id: z.string(),
   slug: z.string(),
@@ -240,6 +253,20 @@ export const productSchema = z.object({
 })
 export type Product = z.infer<typeof productSchema>
 
+/** A file a publisher attached to a title. Downloaded through the API, never linked directly. */
+export const catalogFileSchema = z.object({
+  id: z.string(),
+  /** document: for SchoolShop's review (e.g. KICD approval letter) · resource: comes with the title (e-book, worksheets) */
+  kind: z.enum(["document", "resource"]),
+  label: z.string(),
+  /** The file name as uploaded. */
+  name: z.string(),
+  sizeBytes: z.number().int().nonnegative(),
+  contentType: z.string(),
+  uploadedAt: isoDateTime,
+})
+export type CatalogFile = z.infer<typeof catalogFileSchema>
+
 export const productDetailSchema = productSchema.extend({
   description: z.string(),
   isbn: z.string().nullable(),
@@ -249,6 +276,8 @@ export const productDetailSchema = productSchema.extend({
   /** A few schools whose published lists include this item, for reassurance. */
   onSchoolLists: z.array(z.object({ slug: z.string(), name: z.string(), town: z.string() })),
   related: z.array(productSchema),
+  /** Downloads that come with the title, available to parents once they've bought it. */
+  resources: z.array(z.object({ id: z.string(), label: z.string(), name: z.string(), sizeBytes: z.number().int().nonnegative() })).default([]),
 })
 export type ProductDetail = z.infer<typeof productDetailSchema>
 
@@ -269,12 +298,22 @@ export const catalogItemSchema = z.object({
   lowStockAt: z.number().int().nonnegative(),
   status: z.enum(["live", "draft"]),
   schoolListCount: z.number().int().nonnegative(),
+  /** The uploaded cover, or null to show a coloured placeholder. */
+  coverUrl: z.url().nullable().default(null),
+  files: z.array(catalogFileSchema).default([]),
   /** New titles wait for SchoolShop to check them before schools can see them. */
   review: z
     .object({ state: z.enum(["pending", "changes_requested", "rejected"]), note: z.string().nullable(), submittedAt: isoDateTime })
     .nullish(),
 })
 export type CatalogItem = z.infer<typeof catalogItemSchema>
+
+/** Products on a school's booklist can't be deleted; they come back in kept with the reason. */
+export const catalogDeleteResultSchema = z.object({
+  deleted: z.number().int().nonnegative(),
+  kept: z.array(z.object({ id: z.string(), title: z.string(), reason: z.string() })),
+})
+export type CatalogDeleteResult = z.infer<typeof catalogDeleteResultSchema>
 
 export const schoolOverviewSchema = z.object({
   schoolName: z.string(),
@@ -590,6 +629,10 @@ export const studentImportResultSchema = z.object({
 })
 export type StudentImportResult = z.infer<typeof studentImportResultSchema>
 
+/** A CSV price list, checked (dry run) or imported. Same shape as the student import. */
+export const catalogImportResultSchema = studentImportResultSchema
+export type CatalogImportResult = StudentImportResult
+
 export const staffMemberSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -744,6 +787,9 @@ export const catalogSubmissionSchema = z.object({
   /** Checked automatically when the title comes in. */
   checks: z.array(z.object({ id: z.string(), label: z.string(), result: z.enum(["pass", "warn", "fail"]), detail: z.string() })),
   similar: z.array(z.object({ title: z.string(), publisherName: z.string(), priceCents: cents })),
+  /** The title's cover and attached files, for the reviewer to check. */
+  coverUrl: z.url().nullable().default(null),
+  files: z.array(catalogFileSchema).default([]),
   history: z.array(z.object({ id: z.string(), at: isoDateTime, actor: z.string(), text: z.string() })),
 })
 export type CatalogSubmission = z.infer<typeof catalogSubmissionSchema>
@@ -789,6 +835,26 @@ export const platformSettingsSchema = z.object({
 export type PlatformSettings = z.infer<typeof platformSettingsSchema>
 export type SettingsSection = "commission" | "payouts" | "refunds" | "mpesa" | "terms" | "support"
 
+/** A publisher's term at a glance. */
+export const publisherOverviewSchema = z.object({
+  publisherName: z.string(),
+  termName: z.string(),
+  /** What parents paid for this publisher's titles this term, less anything it couldn't supply. */
+  salesCents: cents,
+  packs: z.number().int(),
+  schools: z.number().int(),
+  /** Share SchoolShop keeps, 0–1: the publisher's own rate or the default. */
+  commissionRate: z.number(),
+  batches: z.object({ collecting: z.number().int(), readyToPack: z.number().int(), dispatched: z.number().int(), received: z.number().int() }),
+  /** Schools whose packs are ready to go, soonest due first. */
+  toDispatch: z.array(z.object({ id: z.string(), schoolName: z.string(), town: z.string(), packs: z.number().int(), dueAtSchool: isoDate })),
+  catalog: z.object({ live: z.number().int(), inReview: z.number().int(), changesRequested: z.number().int(), lowStock: z.number().int() }),
+  /** Best sellers this term, by sales. */
+  topTitles: z.array(z.object({ title: z.string(), qty: z.number().int(), salesCents: cents })),
+  alerts: z.array(z.object({ id: z.string(), severity: z.enum(["high", "medium", "info"]), title: z.string(), detail: z.string(), href: z.string() })),
+})
+export type PublisherOverview = z.infer<typeof publisherOverviewSchema>
+
 export const orgStatusSchema = z.enum(["pending", "info_requested", "live", "suspended", "rejected"])
 export type OrgStatus = z.infer<typeof orgStatusSchema>
 
@@ -812,6 +878,8 @@ export const orgCheckSchema = z.object({
   state: z.enum(["verified", "uploaded", "missing", "failed"]),
   fileName: z.string().nullable(),
   uploadedAt: isoDateTime.nullable(),
+  /** The applicant sent a file for this check, which staff can download. */
+  hasFile: z.boolean().default(false),
 })
 export type OrgCheck = z.infer<typeof orgCheckSchema>
 
