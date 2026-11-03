@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Dialog } from "radix-ui"
-import { AlertTriangle, Pencil, Plus, Search, Upload, X } from "lucide-react"
+import { AlertTriangle, Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react"
 import { z } from "zod"
 
 import { TitleUploads } from "@/components/catalog/TitleUploads"
@@ -17,8 +17,8 @@ import { NativeSelect } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { ApiError } from "@/lib/api/client"
 import type { CatalogItemInput } from "@/lib/api/endpoints"
-import { useCatalog, useImportPriceList, useSaveCatalogItem } from "@/lib/api/queries"
-import type { CatalogImportResult, CatalogItem } from "@/lib/api/schemas"
+import { useCatalog, useDeleteCatalogItems, useImportPriceList, useSaveCatalogItem } from "@/lib/api/queries"
+import type { CatalogDeleteResult, CatalogImportResult, CatalogItem } from "@/lib/api/schemas"
 import { formatKes } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
@@ -95,6 +95,9 @@ function Catalog({ items }: { items: CatalogItem[] }) {
   const [band, setBand] = useState("all")
   const [search, setSearch] = useState("")
   const [editing, setEditing] = useState<CatalogItem | "new" | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [confirming, setConfirming] = useState(false)
+  const [deleted, setDeleted] = useState<CatalogDeleteResult | null>(null)
 
   const counts = useMemo(() => {
     const c = { all: items.length, live: 0, low: 0, out: 0, draft: 0 }
@@ -109,6 +112,27 @@ function Catalog({ items }: { items: CatalogItem[] }) {
       (band === "all" || i.gradeBand === band) &&
       (!q || i.title.toLowerCase().includes(q) || (i.isbn ?? "").replace(/-/g, "").includes(q.replace(/-/g, "")))
   )
+
+  // Only products still in the catalog count, e.g. after some were deleted.
+  const chosen = items.filter((i) => selected.has(i.id))
+  const allShown = shown.length > 0 && shown.every((i) => selected.has(i.id))
+  const someShown = shown.some((i) => selected.has(i.id))
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  const toggleShown = () =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      for (const i of shown) {
+        if (allShown) next.delete(i.id)
+        else next.add(i.id)
+      }
+      return next
+    })
 
   const atRisk = items.filter((i) => (stockState(i) === "out" || stockState(i) === "low") && i.schoolListCount > 0)
   const placements = items.reduce((s, i) => s + i.schoolListCount, 0)
@@ -185,7 +209,19 @@ function Catalog({ items }: { items: CatalogItem[] }) {
           ))}
         </div>
 
-        <p className="text-sm text-muted-foreground" aria-live="polite">{plural(shown.length, "title")}</p>
+        {deleted && <DeleteNotice result={deleted} onClose={() => setDeleted(null)} />}
+
+        {chosen.length > 0 ? (
+          <div role="region" aria-label="Selected products" className="flex flex-wrap items-center gap-3 rounded-xl bg-secondary px-4 py-2.5">
+            <span className="text-sm font-semibold" aria-live="polite">{plural(chosen.length, "product")} selected</span>
+            <Button variant="outline" size="sm" className="text-destructive" onClick={() => setConfirming(true)}>
+              <Trash2 aria-hidden /> Delete
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>Clear selection</Button>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground" aria-live="polite">{plural(shown.length, "title")}</p>
+        )}
 
         {shown.length === 0 ? (
           <div className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">
@@ -197,6 +233,9 @@ function Catalog({ items }: { items: CatalogItem[] }) {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-10">
+                      <Checkbox checked={allShown} indeterminate={someShown && !allShown} onChange={toggleShown} label="Select all products shown" />
+                    </TableHead>
                     <TableHead>Title</TableHead>
                     <TableHead>ISBN</TableHead>
                     <TableHead>Grade</TableHead>
@@ -211,7 +250,10 @@ function Catalog({ items }: { items: CatalogItem[] }) {
                   {shown.map((item) => {
                     const st = stockState(item)
                     return (
-                      <TableRow key={item.id}>
+                      <TableRow key={item.id} data-state={selected.has(item.id) ? "selected" : undefined}>
+                        <TableCell>
+                          <Checkbox checked={selected.has(item.id)} onChange={() => toggle(item.id)} label={`Select ${item.title}`} />
+                        </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-3">
                             <Cover item={item} />
@@ -242,12 +284,17 @@ function Catalog({ items }: { items: CatalogItem[] }) {
               </Table>
             </div>
 
+            <label className="flex items-center gap-3 text-sm font-medium md:hidden">
+              <Checkbox checked={allShown} indeterminate={someShown && !allShown} onChange={toggleShown} label="Select all products shown" />
+              Select all
+            </label>
             <ul className="flex flex-col gap-3 md:hidden">
               {shown.map((item) => {
                 const st = stockState(item)
                 return (
-                  <li key={item.id} className="flex flex-col gap-3 rounded-2xl border p-4">
+                  <li key={item.id} className={cn("flex flex-col gap-3 rounded-2xl border p-4", selected.has(item.id) && "border-ink bg-paper")}>
                     <div className="flex items-start gap-3">
+                      <Checkbox checked={selected.has(item.id)} onChange={() => toggle(item.id)} label={`Select ${item.title}`} />
                       <Cover item={item} />
                       <span className="flex min-w-0 grow flex-col">
                         <span className="font-semibold">{item.title}</span>
@@ -273,7 +320,95 @@ function Catalog({ items }: { items: CatalogItem[] }) {
       </div>
 
       <TitleSheet editing={editing} onClose={() => setEditing(null)} onCreated={setEditing} />
+      <DeleteDialog
+        items={confirming ? chosen : []}
+        onClose={() => setConfirming(false)}
+        onDone={(result) => {
+          setConfirming(false)
+          setDeleted(result)
+          setSelected(new Set(result.kept.map((k) => k.id)))
+        }}
+      />
     </>
+  )
+}
+
+/* ── Selecting and deleting ──────────────────────────────────── */
+
+function Checkbox({ checked, indeterminate = false, onChange, label }: { checked: boolean; indeterminate?: boolean; onChange: () => void; label: string }) {
+  return (
+    <input
+      type="checkbox"
+      aria-label={label}
+      checked={checked}
+      ref={(el) => {
+        if (el) el.indeterminate = indeterminate
+      }}
+      onChange={onChange}
+      className="mt-0.5 size-5 shrink-0 cursor-pointer accent-[var(--teal)]"
+    />
+  )
+}
+
+function DeleteDialog({ items, onClose, onDone }: { items: CatalogItem[]; onClose: () => void; onDone: (result: CatalogDeleteResult) => void }) {
+  const remove = useDeleteCatalogItems()
+  const [error, setError] = useState<string | null>(null)
+  const listed = items.filter((i) => i.schoolListCount > 0)
+  return (
+    <Dialog.Root open={items.length > 0} onOpenChange={(open) => !open && (setError(null), onClose())}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-ink/40" />
+        <Dialog.Content className="fixed top-1/2 left-1/2 z-50 flex max-h-[85dvh] w-[min(520px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 overflow-y-auto rounded-3xl bg-surface p-6 outline-none">
+          <Dialog.Title className="font-display text-xl font-semibold">Delete {plural(items.length, "product")}?</Dialog.Title>
+          <Dialog.Description className="text-sm text-muted-foreground">
+            They'll be removed from your catalog with their cover and files. This can't be undone.
+          </Dialog.Description>
+          <ul className="divide-y rounded-xl border text-sm">
+            {items.slice(0, 6).map((i) => (
+              <li key={i.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                <span className="min-w-0 truncate font-medium">{i.title}</span>
+                {i.schoolListCount > 0 && <Badge variant="warning">On {plural(i.schoolListCount, "list")}</Badge>}
+              </li>
+            ))}
+            {items.length > 6 && <li className="px-4 py-2.5 text-muted-foreground">and {items.length - 6} more</li>}
+          </ul>
+          {listed.length > 0 && (
+            <p className="rounded-xl bg-warn-bg px-4 py-3 text-sm text-warn-fg">
+              {plural(listed.length, "product")} {listed.length === 1 ? "is" : "are"} on school booklists and will be kept. Untick Live to hide {listed.length === 1 ? "it" : "them"} instead.
+            </p>
+          )}
+          {error && <p role="alert" className="text-sm font-medium text-destructive">{error}</p>}
+          <div className="flex gap-3">
+            <Dialog.Close asChild>
+              <Button variant="outline" className="grow">Cancel</Button>
+            </Dialog.Close>
+            <Button
+              variant="destructive"
+              className="grow"
+              disabled={remove.isPending || listed.length === items.length}
+              onClick={() => {
+                setError(null)
+                remove.mutate(items.map((i) => i.id), { onSuccess: onDone, onError: (e) => setError(e.message) })
+              }}
+            >
+              <Trash2 aria-hidden /> {remove.isPending ? "Deleting…" : `Delete ${plural(items.length - listed.length, "product")}`}
+            </Button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  )
+}
+
+function DeleteNotice({ result, onClose }: { result: CatalogDeleteResult; onClose: () => void }) {
+  return (
+    <div role="status" className={cn("flex items-start gap-3 rounded-xl px-4 py-3 text-sm", result.kept.length ? "bg-warn-bg text-warn-fg" : "bg-success-bg")}>
+      <div className="flex grow flex-col gap-1">
+        <span className="font-semibold">Deleted {plural(result.deleted, "product")}.</span>
+        {result.kept.map((k) => <span key={k.id}>Kept {k.title}: {k.reason}</span>)}
+      </div>
+      <Button variant="ghost" size="sm" aria-label="Dismiss" onClick={onClose}><X aria-hidden /></Button>
+    </div>
   )
 }
 
