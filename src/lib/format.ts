@@ -50,3 +50,16 @@ export function normaliseIdentifier(input: string): string | null {
   if (v.includes("@")) return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? v.toLowerCase() : null
   return normaliseKenyanPhone(v)
 }
+
+/** 1536 → "1.5 KB", 2_400_000 → "2.3 MB". */
+export function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  const units = ["KB", "MB", "GB"]
+  let value = bytes / 1024
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit += 1
+  }
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`
+}
