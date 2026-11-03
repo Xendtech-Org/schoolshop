@@ -102,7 +102,7 @@ export type OrgApplicationInput = {
  * School or publisher sign-up. Lands in the platform admin verification queue.
  * Documents (optional) go with it as files, keyed like "kra_pin" (see lib/orgDocuments).
  */
-export async function applyForOrganisation(input: OrgApplicationInput, documents: Partial<Record<string, File>> = {}) {
+export async function applyForOrganisation(input: OrgApplicationInput, documents: Record<string, File | null | undefined> = {}) {
   const files = Object.entries(documents).filter((e): e is [string, File] => !!e[1])
   if (!files.length) return post("/organisations/applications/", orgApplicationSchema, input)
   const form = new FormData()
