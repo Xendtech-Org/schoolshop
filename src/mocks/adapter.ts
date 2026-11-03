@@ -1510,6 +1510,19 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     payouts.account = { method, accountName: String(body.accountName), masked, status: "pending_verification" }
     return payouts.account
   }],
+  ["post", "/publisher/catalog/delete/", ({ body }) => {
+    const ids = (body.ids as string[] | undefined) ?? []
+    if (!ids.length) throw new HttpError(400, { ids: ["Choose at least one product."] })
+    const found = ids.map((id) => catalog.get(id)).filter((c): c is CatalogItem => !!c)
+    if (!found.length) throw notFound()
+    const kept = found.filter((c) => c.schoolListCount > 0).map((c) => ({ id: c.id, title: c.title, reason: "It's on a school booklist, so it can't be deleted. Untick Live to hide it instead." }))
+    for (const c of found) {
+      if (c.schoolListCount > 0) continue
+      catalog.delete(c.id)
+      for (const [id, x] of submissions) if (x.catalogId === c.id && (x.status === "pending" || x.status === "changes_requested")) submissions.delete(id)
+    }
+    return { deleted: found.length - kept.length, kept }
+  }],
   ["post", "/publisher/catalog/import/", ({ body }) => {
     const file = body.file as File | undefined
     if (!file) throw new HttpError(400, { file: ["Choose a file to upload."] })

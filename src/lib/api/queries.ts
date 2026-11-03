@@ -405,6 +405,11 @@ export const useCatalogUploads = () => {
   }
 }
 
+export const useDeleteCatalogItems = () => {
+  const qc = useQueryClient()
+  return useMutation({ mutationFn: endpoints.deleteCatalogItems, onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.catalog }) })
+}
+
 export const useImportPriceList = () => {
   const qc = useQueryClient()
   return useMutation({

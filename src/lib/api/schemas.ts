@@ -295,6 +295,13 @@ export const catalogItemSchema = z.object({
 })
 export type CatalogItem = z.infer<typeof catalogItemSchema>
 
+/** Products on a school's booklist can't be deleted; they come back in kept with the reason. */
+export const catalogDeleteResultSchema = z.object({
+  deleted: z.number().int().nonnegative(),
+  kept: z.array(z.object({ id: z.string(), title: z.string(), reason: z.string() })),
+})
+export type CatalogDeleteResult = z.infer<typeof catalogDeleteResultSchema>
+
 export const schoolOverviewSchema = z.object({
   schoolName: z.string(),
   termName: z.string(),
