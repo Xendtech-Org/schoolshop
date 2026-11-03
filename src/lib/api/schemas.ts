@@ -748,7 +748,7 @@ export const catalogSubmissionSchema = z.object({
 })
 export type CatalogSubmission = z.infer<typeof catalogSubmissionSchema>
 
-export const auditCategorySchema = z.enum(["organisations", "orders", "money", "catalog", "staff"])
+export const auditCategorySchema = z.enum(["organisations", "orders", "money", "catalog", "staff", "settings"])
 export type AuditCategory = z.infer<typeof auditCategorySchema>
 /** One thing someone at SchoolShop did. Written by the server; nobody can edit or delete it. */
 export const auditEntrySchema = z.object({
@@ -761,6 +761,33 @@ export const auditEntrySchema = z.object({
   target: z.object({ label: z.string(), href: z.string() }).nullable(),
 })
 export type AuditEntry = z.infer<typeof auditEntrySchema>
+
+/** How SchoolShop runs: what it charges publishers, when money moves, and what parents see. */
+export const platformSettingsSchema = z.object({
+  commission: z.object({
+    /** Share of what parents pay that SchoolShop keeps, 0–1. */
+    defaultRate: z.number(),
+    overrides: z.array(z.object({ publisherId: z.string(), publisherName: z.string(), rate: z.number(), note: z.string() })),
+  }),
+  payouts: z.object({
+    /** Days after the school confirms delivery before a payout is ready, so schools can report problems. */
+    holdDays: z.number().int(),
+    minimumCents: cents,
+    autoRelease: z.boolean(),
+  }),
+  refunds: z.object({
+    /** Out-of-stock refunds up to this per order go back without anyone approving them. 0 turns it off. */
+    autoApproveUpToCents: cents,
+    parentRequestsUntil: z.enum(["dispatched", "at_school"]),
+  }),
+  mpesa: z.object({ paybill: z.string(), callbackTimeoutMinutes: z.number().int() }),
+  terms: z.array(z.object({ id: z.string(), name: z.string(), orderingOpensOn: isoDate, startsOn: isoDate, endsOn: isoDate })),
+  support: z.object({ phone: z.string(), whatsapp: z.string(), email: z.string(), hours: z.string() }),
+  publishers: z.array(z.object({ id: z.string(), name: z.string() })),
+  updated: z.record(z.string(), z.object({ at: isoDateTime, by: z.string() })),
+})
+export type PlatformSettings = z.infer<typeof platformSettingsSchema>
+export type SettingsSection = "commission" | "payouts" | "refunds" | "mpesa" | "terms" | "support"
 
 export const orgStatusSchema = z.enum(["pending", "info_requested", "live", "suspended", "rejected"])
 export type OrgStatus = z.infer<typeof orgStatusSchema>

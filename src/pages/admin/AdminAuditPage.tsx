@@ -24,6 +24,7 @@ const categories: { id: AuditCategory; label: string }[] = [
   { id: "money", label: "Money" },
   { id: "catalog", label: "Catalog" },
   { id: "staff", label: "Staff & access" },
+  { id: "settings", label: "Fees & settings" },
 ]
 const label = Object.fromEntries(categories.map((c) => [c.id, c.label])) as Record<AuditCategory, string>
 const PAGE = 50

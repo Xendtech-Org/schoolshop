@@ -10,7 +10,6 @@ import { RegisterOrganisationPage } from "@/pages/auth/RegisterOrganisationPage"
 import { ResetPasswordPage } from "@/pages/auth/ResetPasswordPage"
 import { SignInPage } from "@/pages/auth/SignInPage"
 import { SignUpPage } from "@/pages/auth/SignUpPage"
-import { ComingSoonPage } from "@/pages/ComingSoonPage"
 import { NotFoundPage } from "@/pages/NotFoundPage"
 import { HomePage } from "@/pages/public/HomePage"
 import { SchoolPage } from "@/pages/public/SchoolPage"
@@ -53,10 +52,6 @@ const adminNav: DashboardNavItem[] = [
   { to: "/admin/audit", label: "Audit log", permission: "audit.view" },
   { to: "/admin/staff", label: "Staff & roles", permission: "staff.manage" },
 ]
-
-/** Placeholder routes for every nav entry that isn't built yet (index routes are handled separately). */
-const comingSoon = (nav: DashboardNavItem[], base: string) =>
-  nav.filter((n) => !n.end).map((n) => ({ path: n.to.slice(base.length + 1), element: <ComingSoonPage title={n.label} /> }))
 
 export const router = createBrowserRouter([
   {
@@ -148,7 +143,7 @@ export const router = createBrowserRouter([
           { path: "refunds", lazy: page(() => import("@/pages/admin/AdminRefundsPage"), "AdminRefundsPage") },
           { path: "catalog", lazy: page(() => import("@/pages/admin/AdminCatalogPage"), "AdminCatalogPage") },
           { path: "audit", lazy: page(() => import("@/pages/admin/AdminAuditPage"), "AdminAuditPage") },
-          ...comingSoon(adminNav.filter((n) => !["/admin/staff", "/admin/organisations", "/admin/orders", "/admin/payments", "/admin/refunds", "/admin/catalog", "/admin/audit"].includes(n.to)), "/admin"),
+          { path: "settings", lazy: page(() => import("@/pages/admin/AdminSettingsPage"), "AdminSettingsPage") },
         ],
       },
     ],

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import * as endpoints from "@/lib/api/endpoints"
-import type { Account, AdminMoney, AdminRefunds, AdminOrder, AdminOrg, CollectionRow, PublisherSettings, SchoolSettings, StaffDirectory } from "@/lib/api/schemas"
+import type { Account, AdminMoney, AdminRefunds, SettingsSection, AdminOrder, AdminOrg, CollectionRow, PublisherSettings, SchoolSettings, StaffDirectory } from "@/lib/api/schemas"
 import { useAuthStore } from "@/stores/auth"
 
 export const queryKeys = {
@@ -30,6 +30,7 @@ export const queryKeys = {
   adminRefunds: ["admin-refunds"] as const,
   catalogReview: ["admin-catalog"] as const,
   audit: ["admin-audit"] as const,
+  platformSettings: ["admin-settings"] as const,
   collections: ["admin-collections"] as const,
   staff: (scope: string) => ["staff", scope] as const,
   schoolOrder: (id: string) => ["school-orders", id] as const,
@@ -208,6 +209,20 @@ export function useAccountMutation<V>(fn: (vars: V) => Promise<Account>) {
 }
 
 export const useRequestDeletion = () => useMutation({ mutationFn: endpoints.requestAccountDeletion })
+
+export const usePlatformSettings = () => useQuery({ queryKey: queryKeys.platformSettings, queryFn: endpoints.getPlatformSettings })
+
+/** A commission change reprices payouts still waiting for delivery, so money pages refresh too. */
+export function useSavePlatformSettings() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ section, value }: { section: SettingsSection; value: unknown }) => endpoints.savePlatformSettings(section, value as never),
+    onSuccess: (data) => {
+      qc.setQueryData(queryKeys.platformSettings, data)
+      return Promise.all([queryKeys.adminMoney, queryKeys.payouts, queryKeys.audit].map((queryKey) => qc.invalidateQueries({ queryKey })))
+    },
+  })
+}
 
 export const useCatalogSubmissions = () => useQuery({ queryKey: queryKeys.catalogReview, queryFn: endpoints.listCatalogSubmissions })
 /** Every admin action writes to the log, so it's fetched fresh each time the page opens. */

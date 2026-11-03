@@ -2,6 +2,7 @@ import type {
   AdminOrder,
   AdminOrg,
   AuditCategory,
+  PlatformSettings,
   AdminOverview,
   Booklist,
   CatalogItem,
@@ -824,6 +825,26 @@ export const auditSeeds: { hoursAgo: number; actor: string; role: string; catego
   { hoursAgo: 90, actor: "SchoolShop Ops", role: "Super admin", category: "staff", text: "made Daniel Otieno Finance", target: { label: "Staff & roles", href: "/admin/staff" } },
   { hoursAgo: 144, actor: "Kevin Mutai", role: "Operations", category: "organisations", text: "paused Brightstar School: \"Parents report paid packs not handed out\"", target: { label: "Brightstar School", href: "/admin/organisations?tab=suspended&org=sch-brightstar" } },
 ]
+
+/** Platform settings as SchoolShop runs today. Only super admins can change them. */
+export const platformSettings: Omit<PlatformSettings, "publishers" | "updated"> = {
+  commission: {
+    defaultRate: DEMO_COMMISSION,
+    overrides: [
+      { publisherId: "pub-klb", publisherName: "Kenya Literature Bureau", rate: 0.06, note: "Government publisher. Agreed rate until December 2027." },
+      { publisherId: "pub-storymoja", publisherName: "Storymoja", rate: 0.1, note: "Small publisher. Includes help listing titles." },
+    ],
+  },
+  payouts: { holdDays: 2, minimumCents: k(1000), autoRelease: false },
+  refunds: { autoApproveUpToCents: 0, parentRequestsUntil: "dispatched" },
+  mpesa: { paybill: "522533", callbackTimeoutMinutes: 2 },
+  terms: [
+    { id: "t-2027-1", name: "Term 1, 2027", orderingOpensOn: "2026-11-23", startsOn: "2027-01-06", endsOn: "2027-04-02" },
+    { id: "t-2027-2", name: "Term 2, 2027", orderingOpensOn: "2027-03-22", startsOn: "2027-04-28", endsOn: "2027-07-30" },
+    { id: "t-2027-3", name: "Term 3, 2027", orderingOpensOn: "2027-07-19", startsOn: "2027-08-25", endsOn: "2027-10-30" },
+  ],
+  support: { phone: "0709 123 456", whatsapp: "0709 123 456", email: "help@schoolshop.co.ke", hours: "Mon–Sat, 7am–8pm" },
+}
 
 /** Deliveries a school has disputed. The adapter links each to the affected parents' orders and the publisher's payout. */
 export const disputeSeeds = [
