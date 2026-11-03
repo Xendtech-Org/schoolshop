@@ -5,6 +5,7 @@ import { Dialog } from "radix-ui"
 import { AlertTriangle, Pencil, Plus, Search, Upload, X } from "lucide-react"
 import { z } from "zod"
 
+import { TitleUploads } from "@/components/catalog/TitleUploads"
 import { PageHeader } from "@/components/common/PageHeader"
 import { QueryBoundary } from "@/components/common/QueryBoundary"
 import { StatCard } from "@/components/common/StatCard"
@@ -271,12 +272,13 @@ function Catalog({ items }: { items: CatalogItem[] }) {
         )}
       </div>
 
-      <TitleSheet editing={editing} onClose={() => setEditing(null)} />
+      <TitleSheet editing={editing} onClose={() => setEditing(null)} onCreated={setEditing} />
     </>
   )
 }
 
 function Cover({ item }: { item: CatalogItem }) {
+  if (item.coverUrl) return <img src={item.coverUrl} alt="" className="h-12 w-9 shrink-0 rounded-md border object-cover" />
   const tone = coverTones[[...item.subject].reduce((s, ch) => s + ch.charCodeAt(0), 0) % coverTones.length]
   return <span aria-hidden className={cn("h-12 w-9 shrink-0 rounded-md", tone)} />
 }
@@ -319,7 +321,7 @@ function toValues(item: CatalogItem | null): TitleValues {
     : { title: "", subject: "", gradeLabel: "", isbn: "", format: formats[0], price: "", stock: "0", lowStockAt: "100", visible: true }
 }
 
-function TitleSheet({ editing, onClose }: { editing: CatalogItem | "new" | null; onClose: () => void }) {
+function TitleSheet({ editing, onClose, onCreated }: { editing: CatalogItem | "new" | null; onClose: () => void; onCreated: (item: CatalogItem) => void }) {
   const item = editing && editing !== "new" ? editing : null
   return (
     <Dialog.Root open={editing !== null} onOpenChange={(open) => !open && onClose()}>
@@ -343,14 +345,14 @@ function TitleSheet({ editing, onClose }: { editing: CatalogItem | "new" | null;
               <Button variant="ghost" size="icon" aria-label="Close"><X aria-hidden /></Button>
             </Dialog.Close>
           </div>
-          {editing !== null && <TitleForm key={item?.id ?? "new"} item={item} onDone={onClose} />}
+          {editing !== null && <TitleForm key={item?.id ?? "new"} item={item} onDone={onClose} onCreated={onCreated} />}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
   )
 }
 
-function TitleForm({ item, onDone }: { item: CatalogItem | null; onDone: () => void }) {
+function TitleForm({ item, onDone, onCreated }: { item: CatalogItem | null; onDone: () => void; onCreated: (item: CatalogItem) => void }) {
   const form = useForm<TitleValues>({ resolver: zodResolver(titleSchema), defaultValues: toValues(item) })
   const save = useSaveCatalogItem()
 
@@ -370,7 +372,7 @@ function TitleForm({ item, onDone }: { item: CatalogItem | null; onDone: () => v
     save.mutate(
       { id: item?.id, input },
       {
-        onSuccess: onDone,
+        onSuccess: (saved) => (item ? onDone() : onCreated(saved)),
         onError: (e) => {
           const fields = e instanceof ApiError ? e.fieldErrors : {}
           if (fields.isbn) form.setError("isbn", { message: fields.isbn[0] })
@@ -461,6 +463,11 @@ function TitleForm({ item, onDone }: { item: CatalogItem | null; onDone: () => v
             </label>
           </FormItem>
         )} />
+        {item ? (
+          <TitleUploads itemId={item.id} />
+        ) : (
+          <p className="text-sm text-muted-foreground">After you add the title you can upload its cover, documents for SchoolShop's review, and digital resources.</p>
+        )}
         {form.formState.errors.root && (
           <p role="alert" className="text-sm font-medium text-destructive">{form.formState.errors.root.message}</p>
         )}
