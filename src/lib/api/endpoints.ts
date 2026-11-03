@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { api } from "@/lib/api/client"
-import type { PlatformSettings, PublisherSettings, SchoolSettings, SettingsSection } from "@/lib/api/schemas"
+import type { PaymentsInput, PlatformSettings, PublisherSettings, SchoolSettings, SettingsSection } from "@/lib/api/schemas"
 import {
   accountSchema,
   adminMoneySchema,
@@ -28,6 +28,7 @@ import {
   orgApplicationSchema,
   paginated,
   paymentSchema,
+  paymentOptionsSchema,
   payoutAccountSchema,
   publisherPayoutsSchema,
   publisherSettingsSchema,
@@ -165,8 +166,10 @@ export const createOrder = (input: CreateOrderInput) =>
   post("/orders/", orderSchema, input)
 export const getOrder = (id: string) => get(`/orders/${id}/`, orderSchema)
 export const listOrders = () => get("/orders/", paginated(orderSchema))
-export const startPayment = (orderId: string, input: { method: "mpesa"; phone: string }) =>
+/** M-Pesa sends a prompt to the phone; card returns a redirectUrl to the provider's checkout page. */
+export const startPayment = (orderId: string, input: { method: "mpesa"; phone: string } | { method: "card" }) =>
   post(`/orders/${orderId}/payments/`, paymentSchema, input)
+export const getPaymentOptions = () => get("/payments/options/", paymentOptionsSchema)
 export const getPayment = (id: string) => get(`/payments/${id}/`, paymentSchema)
 
 // School
@@ -330,7 +333,7 @@ export const changePassword = (input: { currentPassword: string; newPassword: st
 export const getAdminOverview = () => get("/admin/overview/", adminOverviewSchema)
 export const getPlatformSettings = () => get("/admin/settings/", platformSettingsSchema)
 /** Saves one section. Every change is written to the audit log. */
-export async function savePlatformSettings<K extends SettingsSection>(section: K, value: PlatformSettings[K]) {
+export async function savePlatformSettings<K extends SettingsSection>(section: K, value: K extends "payments" ? PaymentsInput : PlatformSettings[K]) {
   const { data } = await api.put(`/admin/settings/${section}/`, value)
   return platformSettingsSchema.parse(data)
 }

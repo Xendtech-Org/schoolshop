@@ -108,15 +108,19 @@ export const useCreateOrder = () => {
   })
 }
 
+/** M-Pesa when a phone is given, otherwise a card checkout (the caller sends the browser to its redirectUrl). */
 export const useStartPayment = () =>
   useMutation({
-    mutationFn: ({ orderId, phone }: { orderId: string; phone: string }) =>
-      endpoints.startPayment(orderId, { method: "mpesa", phone }),
+    mutationFn: ({ orderId, phone, method = "mpesa" }: { orderId: string; phone?: string; method?: "mpesa" | "card" }) =>
+      endpoints.startPayment(orderId, method === "card" ? { method: "card" } : { method: "mpesa", phone: phone ?? "" }),
   })
 
+export const usePaymentOptions = () =>
+  useQuery({ queryKey: ["payment-options"], queryFn: endpoints.getPaymentOptions, staleTime: 60_000 })
+
 /**
- * Polls an M-Pesa STK payment until the backend has the Daraja callback.
- * The order is only ever marked paid server-side; the client just watches.
+ * Polls a payment until the provider has answered (SasaPay callback, card webhook,
+ * or the server asking the provider). The order is only ever marked paid server-side.
  */
 export const usePaymentStatus = (id: string | null) => {
   const qc = useQueryClient()

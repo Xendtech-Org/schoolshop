@@ -228,8 +228,18 @@ export const paymentSchema = z.object({
   status: z.enum(["initiated", "succeeded", "failed"]),
   amountCents: cents,
   phone: z.string().nullable(),
-  failureReason: z.enum(["timeout", "cancelled", "insufficient_funds"]).nullable(),
+  failureReason: z.enum(["timeout", "cancelled", "insufficient_funds", "declined"]).nullable(),
+  /** Card payments: the provider's hosted checkout page (Stripe or Paystack) to send the parent to. */
+  redirectUrl: z.string().nullable().default(null),
 })
+
+/** Which ways to pay SchoolShop has switched on. */
+export const paymentOptionsSchema = z.object({
+  mpesa: z.boolean(),
+  card: z.boolean(),
+  cardProvider: z.enum(["stripe", "paystack"]).nullable(),
+})
+export type PaymentOptions = z.infer<typeof paymentOptionsSchema>
 export type Payment = z.infer<typeof paymentSchema>
 
 export const productSchema = z.object({
@@ -829,11 +839,36 @@ export const platformSettingsSchema = z.object({
   mpesa: z.object({ paybill: z.string(), callbackTimeoutMinutes: z.number().int() }),
   terms: z.array(z.object({ id: z.string(), name: z.string(), orderingOpensOn: isoDate, startsOn: isoDate, endsOn: isoDate })),
   support: z.object({ phone: z.string(), whatsapp: z.string(), email: z.string(), hours: z.string() }),
+  /** Payment providers. Saved keys only ever come back as their last four characters ("••••4f2a"), or null. */
+  payments: z.object({
+    /** The server is running with fake providers (demos): no money moves. */
+    fake: z.boolean(),
+    mpesaReady: z.boolean(),
+    cardReady: z.boolean(),
+    sasapay: z.object({
+      enabled: z.boolean(),
+      mode: z.enum(["sandbox", "live"]),
+      merchantCode: z.string(),
+      clientId: z.string().nullable(),
+      clientSecret: z.string().nullable(),
+      callbackUrl: z.string(),
+    }),
+    cardProvider: z.enum(["none", "stripe", "paystack"]),
+    stripe: z.object({ secretKey: z.string().nullable(), webhookSecret: z.string().nullable(), webhookUrl: z.string() }),
+    paystack: z.object({ secretKey: z.string().nullable(), webhookUrl: z.string() }),
+  }),
   publishers: z.array(z.object({ id: z.string(), name: z.string() })),
   updated: z.record(z.string(), z.object({ at: isoDateTime, by: z.string() })),
 })
 export type PlatformSettings = z.infer<typeof platformSettingsSchema>
-export type SettingsSection = "commission" | "payouts" | "refunds" | "mpesa" | "terms" | "support"
+export type SettingsSection = "commission" | "payouts" | "refunds" | "mpesa" | "terms" | "support" | "payments"
+/** What the admin sends to save the providers. Empty key fields keep the saved key. */
+export type PaymentsInput = {
+  sasapay: { enabled: boolean; mode: "sandbox" | "live"; merchantCode: string; clientId: string; clientSecret: string }
+  cardProvider: "none" | "stripe" | "paystack"
+  stripe: { secretKey: string; webhookSecret: string }
+  paystack: { secretKey: string }
+}
 
 /** A publisher's term at a glance. */
 export const publisherOverviewSchema = z.object({
