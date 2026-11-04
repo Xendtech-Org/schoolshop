@@ -204,6 +204,13 @@ export const removeStudent = async (id: string) => {
 export const importStudents = (rows: Omit<StudentInput, "parentName">[], dryRun: boolean) =>
   post("/school/students/import/", studentImportResultSchema, { rows, dryRun })
 /** SMS the school code to parents with a phone on file who haven't linked their child yet. */
+/** Add a class (e.g. "4 East" in Grade 4). Returns the roster. */
+export const addClass = (input: { gradeName: string; className: string }) => post("/school/classes/", classRosterSchema, input)
+/** Only a class with no students can be removed. Returns the roster. */
+export const removeClass = async (className: string) => {
+  const { data } = await api.delete(`/school/classes/${encodeURIComponent(className)}/`)
+  return classRosterSchema.parse(data)
+}
 export const inviteParents = (className: string | null) => post("/school/students/invite/", z.object({ sent: z.number().int() }), { className })
 
 export const listCollection = () => get("/school/collection/", z.array(collectionRowSchema))
@@ -348,13 +355,16 @@ export const getAdminRefunds = () => get("/admin/refunds/", adminRefundsSchema)
 export const approveRefunds = (orderIds: string[]) => post("/admin/refunds/approve/", adminRefundsSchema, { orderIds })
 export const declineRefund = (orderId: string, reason: string) => post(`/admin/refunds/${orderId}/decline/`, adminRefundsSchema, { reason })
 /** Refund every affected parent; the amount comes off the publisher's payout. */
-export const settleDisputeByRefund = (id: string) => post(`/admin/disputes/${id}/refund/`, adminRefundsSchema, {})
+export const settleDisputeByRefund = (id: string, orderIds: string[]) => post(`/admin/disputes/${id}/refund/`, adminRefundsSchema, { orderIds })
 /** The publisher sent the missing packs: close the dispute and free the payout. */
 export const settleDisputeByReplacement = (id: string, note: string) => post(`/admin/disputes/${id}/replace/`, adminRefundsSchema, { note })
 export const getAdminMoney = () => get("/admin/money/", adminMoneySchema)
 export const listCollections = () => get("/admin/collections/", z.array(collectionSchema))
-/** Sends the money. Only approved payouts to a verified account go. */
-export const releasePayouts = (ids: string[]) => post("/admin/payouts/release/", adminMoneySchema, { ids })
+/**
+ * Records payouts finance has sent (from the bank or M-Pesa business account), each with its
+ * transaction reference. Only payouts ready to release, to a verified account, can be recorded.
+ */
+export const releasePayouts = (payouts: { id: string; reference: string }[]) => post("/admin/payouts/release/", adminMoneySchema, { payouts })
 export const holdPayout = (id: string, reason: string) => post(`/admin/payouts/${id}/hold/`, adminMoneySchema, { reason })
 export const unholdPayout = (id: string, note: string) => post(`/admin/payouts/${id}/unhold/`, adminMoneySchema, { note })
 /** Confirms a publisher's new payout account after calling them on the number we already had. */

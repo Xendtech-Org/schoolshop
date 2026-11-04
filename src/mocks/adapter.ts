@@ -98,6 +98,24 @@ function studentView(r: StudentOrderRow) {
   }
 }
 
+function rosterView() {
+    const teachers = directories.school.members.filter((m) => m.role === "teacher" && m.status !== "suspended")
+    return {
+      joinCode: "GRN-2027",
+      classes: allClasses().map(({ className, gradeName }) => {
+        const inClass = schoolRows.filter((r) => r.className === className)
+        return {
+          className,
+          gradeName,
+          teacher: teachers.find((t) => t.classNames.includes(className))?.name ?? null,
+          students: inClass.length,
+          linked: inClass.filter((r) => linked.has(r.studentId)).length,
+        }
+      }),
+      students: schoolRows.map(studentView),
+    }
+  }
+
 function createStudent(body: Record<string, unknown>) {
   const name = String(body.name ?? "").trim()
   const admissionNo = String(body.admissionNo ?? "").trim().toUpperCase()
@@ -1252,10 +1270,12 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     logOrder(o, userId, `declined the refund request: "${reason}"`)
     return refundsView()
   }],
-  ["post", "/admin/disputes/:id/refund/", ({ params, userId }) => {
+  ["post", "/admin/disputes/:id/refund/", ({ params, body, userId }) => {
     const d = disputes.get(params.id) ?? raise(notFound())
     if (d.status !== "open") throw new HttpError(409, { detail: "This dispute is already settled." })
-    const open = d.orderIds.map(findOrder).filter((o) => orderExtra(o).issue === "short_delivery")
+    const picked = new Set((body.orderIds as string[] | undefined) ?? [])
+    if (!picked.size || [...picked].some((id) => !d.orderIds.includes(id))) throw new HttpError(400, { orderIds: ["Tick the students the school says are missing a pack."] })
+    const open = d.orderIds.filter((id) => picked.has(id)).map(findOrder)
     const reason = d.kind === "short" ? `Missing from ${d.publisherName}'s delivery to ${d.schoolName}` : `Damaged in ${d.publisherName}'s delivery to ${d.schoolName}`
     const total = open.reduce((t, o) => t + refundItems(o, publisherItems(o, d.publisherName).map((i) => i.id), reason, userId), 0)
     let where = ""
@@ -1288,13 +1308,16 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
       .flatMap((o) => orderExtra(o).payments.map((p) => ({ id: p.id, at: p.at, orderId: o.id, orderNumber: o.number, schoolName: o.schoolName, phone: display(p.phone)!, amountCents: p.amountCents, receipt: p.receipt, status: p.status })))
       .sort((a, b) => b.at.localeCompare(a.at))],
   ["post", "/admin/payouts/release/", ({ body, userId }) => {
-    const ids = (body.ids as string[]) ?? []
-    if (!ids.length) throw new HttpError(400, { ids: ["Choose the payouts to release."] })
+    const rows = (body.payouts as { id: string; reference: string }[] | undefined) ?? []
+    if (!rows.length) throw new HttpError(400, { payouts: ["Choose the payouts to release."] })
+    if (rows.some((r) => !String(r.reference ?? "").trim())) throw new HttpError(400, { payouts: ["Enter the transaction reference for each payout."] })
+    const refs = new Map(rows.map((r) => [r.id, String(r.reference).trim().toUpperCase()]))
+    const ids = rows.map((r) => r.id)
     const blocked = ids.map(findPayout).filter((p) => p.status !== "queued" || accountFor(publisherOf(p.id)).status !== "verified")
     if (blocked.length) throw new HttpError(409, { detail: `Can't release ${blocked.map((p) => p.deliveryNoteNo).join(", ")}: not ready or the payout account isn't verified.` })
     for (const id of ids) {
       const p = findPayout(id)
-      Object.assign(p, { status: "paid", paidAt: stamp(), reference: "QK" + Math.random().toString(36).slice(2, 10).toUpperCase() })
+      Object.assign(p, { status: "paid", paidAt: stamp(), reference: refs.get(id)! })
       logPayout(id, userId, `released ${formatKes(p.netCents)} to ${accountFor(publisherOf(id)).masked} · ${p.reference}`)
     }
     return money()
@@ -1435,23 +1458,7 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     }
     return org
   }],
-  ["get", "/school/students/", () => {
-    const teachers = directories.school.members.filter((m) => m.role === "teacher" && m.status !== "suspended")
-    return {
-      joinCode: "GRN-2027",
-      classes: allClasses().map(({ className, gradeName }) => {
-        const inClass = schoolRows.filter((r) => r.className === className)
-        return {
-          className,
-          gradeName,
-          teacher: teachers.find((t) => t.classNames.includes(className))?.name ?? null,
-          students: inClass.length,
-          linked: inClass.filter((r) => linked.has(r.studentId)).length,
-        }
-      }),
-      students: schoolRows.map(studentView),
-    }
-  }],
+  ["get", "/school/students/", () => rosterView()],
   ["post", "/school/students/", ({ body }) => studentView(createStudent(body))],
   ["patch", "/school/students/:id/", ({ params, body }) => {
     const row = schoolRows.find((r) => r.studentId === params.id) ?? raise(notFound())
@@ -1500,6 +1507,20 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     })
     if (!body.dryRun) ok.forEach((r) => createStudent(r))
     return { valid: ok.length, created: body.dryRun ? 0 : ok.length, errors }
+  }],
+  ["post", "/school/classes/", ({ body }) => {
+    const grade = db.schoolGrades.find((g) => g.gradeName === body.gradeName) ?? (/^(PP[12]|Grade (1[0-2]|[1-9]))$/.test(String(body.gradeName)) ? (db.schoolGrades.push({ gradeName: String(body.gradeName), classNames: [], students: 0 }), db.schoolGrades.at(-1)!) : raise(new HttpError(400, { gradeName: ["Choose a grade."] })))
+    const name = String(body.className ?? "").trim().replace(/\s+/g, " ")
+    if (!name) throw new HttpError(400, { className: ["Give the class a name, like 4 East."] })
+    if (allClasses().some((c) => c.className.toLowerCase() === name.toLowerCase())) throw new HttpError(400, { className: [`There's already a class called ${name}.`] })
+    grade.classNames.push(name)
+    return rosterView()
+  }],
+  ["delete", "/school/classes/:name/", ({ params }) => {
+    const grade = db.schoolGrades.find((g) => g.classNames.includes(params.name)) ?? raise(notFound())
+    if (schoolRows.some((r) => r.className === params.name)) throw new HttpError(409, { detail: `Move or remove the students in ${params.name} first.` })
+    grade.classNames.splice(grade.classNames.indexOf(params.name), 1)
+    return rosterView()
   }],
   ["post", "/school/students/invite/", ({ body }) => {
     const targets = schoolRows.filter((r) => r.parentPhone && !linked.has(r.studentId) && (!body.className || r.className === body.className))
