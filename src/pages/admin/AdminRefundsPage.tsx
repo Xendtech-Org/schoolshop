@@ -8,6 +8,7 @@ import { QueryBoundary } from "@/components/common/QueryBoundary"
 import { StatCard } from "@/components/common/StatCard"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import * as endpoints from "@/lib/api/endpoints"
@@ -234,7 +235,10 @@ function DisputeCard({ d, mayDecide, onNotice }: { d: Dispute; mayDecide: boolea
   const [note, setNote] = useState("")
   const [error, setError] = useState<string | null>(null)
   const act = useRefundsMutation((fn: () => Promise<AdminRefunds>) => fn())
-  const openOrders = d.orders.filter((o) => o.open)
+  // The school counts packs per class, so whoever settles ticks the students actually missing one.
+  const [ticked, setTicked] = useState<Set<string>>(new Set())
+  const toggle = (id: string, on: boolean) => setTicked((t) => { const n = new Set(t); if (on) n.add(id); else n.delete(id); return n })
+  const tickedCents = d.orders.filter((o) => ticked.has(o.id)).reduce((t, o) => t + o.amountCents, 0)
   const run = (fn: () => Promise<AdminRefunds>, text: string) => { setError(null); act.mutateAsync(fn).then(() => onNotice(text), (e) => setError(errorText(e, "note"))) }
   const resolved = d.status === "resolved"
   return (
@@ -248,18 +252,22 @@ function DisputeCard({ d, mayDecide, onNotice }: { d: Dispute; mayDecide: boolea
           <h2 className="font-display text-xl font-semibold">{d.schoolName} · {d.publisherName}</h2>
           <p className="text-sm">{d.detail}</p>
         </div>
-        {!resolved && <span className="text-right text-sm"><span className="block text-[13px] text-muted-foreground">Refunding parents costs</span><span className="font-display text-lg font-semibold">{formatKes(d.refundCents)}</span></span>}
+        {!resolved && <span className="text-right text-sm"><span className="block text-[13px] text-muted-foreground">Refunding every order listed costs</span><span className="font-display text-lg font-semibold">{formatKes(d.refundCents)}</span></span>}
       </header>
 
       {resolved && d.resolution && <p className="rounded-xl bg-success-bg px-4 py-3 text-sm"><span className="font-semibold">Settled.</span> {d.resolution}</p>}
 
       <div className="grid gap-3 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <section aria-label="Affected orders" className="min-w-0 rounded-xl border">
-          <h3 className="border-b px-4 py-2.5 text-sm font-semibold">{plural(d.orders.length, "parent")} affected</h3>
+          <h3 className="border-b px-4 py-2.5 text-sm font-semibold">
+            {plural(d.orders.length, "order")} in the affected classes
+            {!resolved && mayDecide && <span className="block text-[13px] font-normal text-muted-foreground">Tick the students {d.schoolName} says are missing a pack.</span>}
+          </h3>
           <ul className="divide-y text-sm">
             {d.orders.map((o) => (
               <li key={o.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
-                <span className="min-w-0 truncate"><Link to={`/admin/orders?show=all&order=${o.id}`} className="font-medium text-accent-text hover:underline">{o.number}</Link> · {o.studentName}, {o.className}</span>
+                {!resolved && mayDecide && o.open && <Checkbox aria-label={`Refund ${o.studentName}`} checked={ticked.has(o.id)} onCheckedChange={(v) => toggle(o.id, !!v)} />}
+                <span className="min-w-0 grow truncate"><Link to={`/admin/orders?show=all&order=${o.id}`} className="font-medium text-accent-text hover:underline">{o.number}</Link> · {o.studentName}, {o.className}</span>
                 <span className="flex shrink-0 items-center gap-2">{o.refunded ? <Badge variant="secondary">Refunded</Badge> : !o.open && <Badge variant="secondary">Replaced</Badge>}<span className={cn(!o.open && "text-muted-foreground")}>{formatKes(o.amountCents)}</span></span>
               </li>
             ))}
@@ -290,8 +298,8 @@ function DisputeCard({ d, mayDecide, onNotice }: { d: Dispute; mayDecide: boolea
           </form>
         ) : (
           <div className="flex flex-wrap gap-2">
-            <Button disabled={act.isPending || !openOrders.length} onClick={() => run(() => endpoints.settleDisputeByRefund(d.id), `Refunded ${formatKes(d.refundCents)} to ${plural(openOrders.length, "parent")}. It comes off ${d.publisherName}'s payout.`)}>
-              <RotateCcw aria-hidden /> Refund {plural(openOrders.length, "parent")} · {formatKes(d.refundCents)}
+            <Button disabled={act.isPending || !ticked.size} onClick={() => run(() => endpoints.settleDisputeByRefund(d.id, [...ticked]), `Refunded ${formatKes(tickedCents)} to ${plural(ticked.size, "parent")}. It comes off ${d.publisherName}'s payout.`)}>
+              <RotateCcw aria-hidden /> {ticked.size ? `Refund ${plural(ticked.size, "parent")} · ${formatKes(tickedCents)}` : "Tick who to refund"}
             </Button>
             <Button variant="outline" onClick={() => setReplacing(true)}>Replacement delivered</Button>
           </div>

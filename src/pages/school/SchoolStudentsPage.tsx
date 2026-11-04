@@ -2,7 +2,7 @@ import { useDeferredValue, useMemo, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useSearchParams } from "react-router"
-import { CheckCircle2, ChevronLeft, ChevronRight, Copy, Download, FileUp, MessageSquare, Search, UserPlus, X } from "lucide-react"
+import { CheckCircle2, ChevronLeft, ChevronRight, Copy, Download, FileUp, MessageSquare, Plus, Search, UserPlus, X } from "lucide-react"
 import { z } from "zod"
 
 import { PageHeader } from "@/components/common/PageHeader"
@@ -119,7 +119,13 @@ function Students({ data }: { data: ClassRoster }) {
       </section>
 
       <section aria-labelledby="classes-h" className="flex flex-col gap-3">
-        <h2 id="classes-h" className="font-display text-xl font-semibold">Classes</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 id="classes-h" className="font-display text-xl font-semibold">Classes</h2>
+          <AddClass onDone={setNotice} />
+        </div>
+        {data.classes.length === 0 && (
+          <p className="rounded-2xl border border-dashed bg-card p-4 text-[15px]">Add your classes first, like 4 East in Grade 4. Then add or import the students in each.</p>
+        )}
         <div className="flex flex-col gap-4">
           {gradesWithStudents.map((g) => (
             <div key={g} className="flex flex-col gap-2">
@@ -160,7 +166,7 @@ function Students({ data }: { data: ClassRoster }) {
                 <Button variant="outline" onClick={() => setImporting(true)}><FileUp aria-hidden /> Import class lists</Button>
               </div>
               <div role="group" aria-label="Empty classes" className="flex flex-wrap gap-1.5">
-                {emptyClasses.map((c) => <Badge key={c.className} variant="secondary">{c.className}</Badge>)}
+                {emptyClasses.map((c) => <EmptyClass key={c.className} className={c.className} onDone={setNotice} />)}
               </div>
             </div>
           )}
@@ -507,5 +513,58 @@ function ImportForm({ classes, onDone }: { classes: string[]; onDone: (text: str
         <Button size="lg" onClick={check} disabled={run.isPending}>{run.isPending ? "Checking…" : "Check the list"}</Button>
       )}
     </div>
+  )
+}
+
+/* ── Classes ── */
+
+const GRADES = ["PP1", "PP2", ...Array.from({ length: 12 }, (_, i) => `Grade ${i + 1}`)]
+
+function AddClass({ onDone }: { onDone: (text: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [grade, setGrade] = useState("Grade 1")
+  const [name, setName] = useState("")
+  const add = useRosterMutation(endpoints.addClass)
+  const error = add.error ? errorText(add.error, "className") : null
+  if (!open) return <Button variant="outline" onClick={() => setOpen(true)}><Plus aria-hidden /> Add a class</Button>
+  return (
+    <form
+      className="flex flex-wrap items-end gap-2 rounded-2xl border bg-card p-3"
+      onSubmit={(e) => {
+        e.preventDefault()
+        add.mutate({ gradeName: grade, className: name.trim() }, { onSuccess: () => { onDone(`Added ${name.trim()}.`); setName(""); setOpen(false) } })
+      }}
+    >
+      <label className="flex flex-col gap-1 text-sm font-medium">
+        Grade
+        <NativeSelect value={grade} onChange={(e) => setGrade(e.target.value)} className="w-32">{GRADES.map((g) => <option key={g}>{g}</option>)}</NativeSelect>
+      </label>
+      <label className="flex flex-col gap-1 text-sm font-medium">
+        Class name
+        <Input value={name} onChange={(e) => { setName(e.target.value); add.reset() }} placeholder="e.g. 4 East" className="w-40" autoFocus />
+      </label>
+      <Button type="submit" disabled={!name.trim() || add.isPending}>Add</Button>
+      <Button type="button" variant="ghost" onClick={() => { setOpen(false); add.reset() }}>Cancel</Button>
+      {error && <p role="alert" className="w-full text-sm text-destructive">{error}</p>}
+    </form>
+  )
+}
+
+/** A class with no students yet; it can be removed. */
+function EmptyClass({ className, onDone }: { className: string; onDone: (text: string) => void }) {
+  const remove = useRosterMutation(endpoints.removeClass)
+  return (
+    <Badge variant="secondary" className="gap-1 pr-1">
+      {className}
+      <button
+        type="button"
+        aria-label={`Remove ${className}`}
+        disabled={remove.isPending}
+        onClick={() => remove.mutate(className, { onSuccess: () => onDone(`Removed ${className}.`), onError: (e) => onDone(errorText(e)) })}
+        className="flex size-5 items-center justify-center rounded-full hover:bg-ink/10"
+      >
+        <X className="size-3" aria-hidden />
+      </button>
+    </Badge>
   )
 }

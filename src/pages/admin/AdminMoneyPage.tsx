@@ -256,9 +256,11 @@ function AccountCheck({ payout: p, mayRelease, onDone }: { payout: AdminPayout; 
 }
 
 function ReleaseDialog({ open, payouts, onClose, onDone }: { open: boolean; payouts: AdminPayout[]; onClose: () => void; onDone: (text: string) => void }) {
-  const release = useMoneyMutation((ids: string[]) => endpoints.releasePayouts(ids))
+  const release = useMoneyMutation((rows: { id: string; reference: string }[]) => endpoints.releasePayouts(rows))
   const [error, setError] = useState<string | null>(null)
+  const [refs, setRefs] = useState<Record<string, string>>({})
   const total = sum(payouts)
+  const missing = payouts.some((p) => !refs[p.id]?.trim())
   return (
     <Dialog.Root open={open} onOpenChange={(o) => { if (!o) { setError(null); onClose() } }}>
       <Dialog.Portal>
@@ -266,26 +268,29 @@ function ReleaseDialog({ open, payouts, onClose, onDone }: { open: boolean; payo
         <Dialog.Content className="fixed top-1/2 left-1/2 z-50 flex max-h-[90dvh] w-[calc(100vw-32px)] max-w-lg -translate-1/2 flex-col gap-4 overflow-y-auto rounded-3xl bg-surface p-6 outline-none">
           <div className="flex items-start justify-between gap-3">
             <div className="flex flex-col gap-1">
-              <Dialog.Title className="font-display text-xl font-semibold">Release {formatKes(total)}?</Dialog.Title>
-              <Dialog.Description className="text-sm text-muted-foreground">The money goes out now and can't be pulled back. Each publisher gets an SMS and email with the reference.</Dialog.Description>
+              <Dialog.Title className="font-display text-xl font-semibold">Record {formatKes(total)} as paid</Dialog.Title>
+              <Dialog.Description className="text-sm text-muted-foreground">Send each payout from the bank or M-Pesa business account first, then enter its transaction reference. Each publisher gets an SMS and email with it.</Dialog.Description>
             </div>
             <Dialog.Close asChild><Button variant="ghost" size="icon" aria-label="Close"><X aria-hidden /></Button></Dialog.Close>
           </div>
           <ul className="divide-y rounded-xl border text-sm">
             {payouts.map((p) => (
-              <li key={p.id} className="flex items-center justify-between gap-3 px-4 py-3">
-                <span className="flex min-w-0 flex-col">
-                  <span className="font-medium">{p.publisherName} · {p.schoolName}</span>
-                  <span className="truncate text-[13px] text-muted-foreground">{p.account.masked}</span>
+              <li key={p.id} className="flex flex-col gap-2 px-4 py-3">
+                <span className="flex items-center justify-between gap-3">
+                  <span className="flex min-w-0 flex-col">
+                    <span className="font-medium">{p.publisherName} · {p.schoolName}</span>
+                    <span className="truncate text-[13px] text-muted-foreground">{p.account.masked}</span>
+                  </span>
+                  <span className="shrink-0 font-semibold">{formatKes(p.netCents)}</span>
                 </span>
-                <span className="shrink-0 font-semibold">{formatKes(p.netCents)}</span>
+                <Input aria-label={`Transaction reference for ${p.publisherName}, ${p.schoolName}`} placeholder="Transaction reference, e.g. QK7H2M9X" value={refs[p.id] ?? ""} onChange={(e) => setRefs({ ...refs, [p.id]: e.target.value })} />
               </li>
             ))}
           </ul>
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <div className="flex flex-wrap gap-2">
-            <Button disabled={release.isPending || !payouts.length} onClick={() => release.mutateAsync(payouts.map((p) => p.id)).then(() => onDone(`Released ${formatKes(total)} to ${plural(new Set(payouts.map((p) => p.publisherId)).size, "publisher")}.`), (e) => setError(errorText(e)))}>
-              <Send aria-hidden /> Release {formatKes(total)}
+            <Button disabled={release.isPending || !payouts.length || missing} onClick={() => release.mutateAsync(payouts.map((p) => ({ id: p.id, reference: refs[p.id].trim() }))).then(() => { setRefs({}); onDone(`Recorded ${formatKes(total)} paid to ${plural(new Set(payouts.map((p) => p.publisherId)).size, "publisher")}.`) }, (e) => setError(errorText(e)))}>
+              <Send aria-hidden /> Record {formatKes(total)} as paid
             </Button>
             <Dialog.Close asChild><Button variant="ghost">Cancel</Button></Dialog.Close>
           </div>
@@ -297,10 +302,12 @@ function ReleaseDialog({ open, payouts, onClose, onDone }: { open: boolean; payo
 
 function PayoutDetail({ payout: p, mayRelease }: { payout: AdminPayout; mayRelease: boolean }) {
   const [holding, setHolding] = useState(false)
+  const [paying, setPaying] = useState(false)
+  const [reference, setReference] = useState("")
   const [reason, setReason] = useState("")
   const [error, setError] = useState<string | null>(null)
   const act = useMoneyMutation((fn: () => Promise<AdminMoney>) => fn())
-  const run = (fn: () => Promise<AdminMoney>) => { setError(null); act.mutateAsync(fn).then(() => { setHolding(false); setReason("") }, (e) => setError(errorText(e, "reason"))) }
+  const run = (fn: () => Promise<AdminMoney>) => { setError(null); act.mutateAsync(fn).then(() => { setHolding(false); setPaying(false); setReason(""); setReference("") }, (e) => setError(errorText(e, "reason"))) }
   const rows: [string, number, string?][] = [
     ["Parents paid for these packs", p.grossCents],
     [`SchoolShop commission`, -p.commissionCents],
@@ -313,7 +320,7 @@ function PayoutDetail({ payout: p, mayRelease }: { payout: AdminPayout; mayRelea
         <span className="text-sm text-muted-foreground">{p.deliveryNoteNo} · {p.packs} packs · {p.termName}</span>
       </div>
       {p.status === "on_hold" && p.holdReason && <p className="rounded-xl bg-warn-bg px-4 py-3 text-sm text-warn-fg"><span className="font-semibold">On hold.</span> {p.holdReason}</p>}
-      {p.status === "held" && <p className="rounded-xl bg-info-bg px-4 py-3 text-sm">This becomes ready to release once {p.schoolName} confirms the delivery.</p>}
+      {p.status === "held" && <p className="rounded-xl bg-info-bg px-4 py-3 text-sm">{p.receivedAt ? `${p.schoolName} confirmed the delivery. It's ready to release once the hold days set in Fees & settings have passed.` : `This becomes ready to release once ${p.schoolName} confirms the delivery.`}</p>}
 
       <section aria-label="Breakdown" className="rounded-xl border">
         <dl className="divide-y text-sm">
@@ -336,7 +343,18 @@ function PayoutDetail({ payout: p, mayRelease }: { payout: AdminPayout; mayRelea
 
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {mayRelease && p.status !== "paid" && (
-        holding ? (
+        paying ? (
+          <form className="flex flex-col gap-3 rounded-xl border p-4" onSubmit={(e) => { e.preventDefault(); if (!reference.trim()) return setError("Enter the transaction reference."); run(() => endpoints.releasePayouts([{ id: p.id, reference: reference.trim() }])) }}>
+            <label className="flex flex-col gap-1.5 text-sm font-medium">
+              Send {formatKes(p.netCents)} to {p.account.masked} first, then enter the transaction reference
+              <Input value={reference} onChange={(e) => { setReference(e.target.value); setError(null) }} placeholder="e.g. QK7H2M9X" autoFocus />
+            </label>
+            <div className="flex gap-2">
+              <Button type="submit" disabled={act.isPending}>Record as paid</Button>
+              <Button type="button" variant="ghost" onClick={() => setPaying(false)}>Cancel</Button>
+            </div>
+          </form>
+        ) : holding ? (
           <form className="flex flex-col gap-3 rounded-xl border p-4" onSubmit={(e) => { e.preventDefault(); if (!reason.trim()) return setError("Give the reason. The publisher sees it."); run(() => endpoints.holdPayout(p.id, reason.trim())) }}>
             <label className="flex flex-col gap-1.5 text-sm font-medium">
               Why hold this payout?
@@ -349,7 +367,7 @@ function PayoutDetail({ payout: p, mayRelease }: { payout: AdminPayout; mayRelea
           </form>
         ) : (
           <div className="flex flex-wrap gap-2">
-            {releasable(p) && <Button disabled={act.isPending} onClick={() => run(() => endpoints.releasePayouts([p.id]))}><Send aria-hidden /> Release {formatKes(p.netCents)}</Button>}
+            {releasable(p) && <Button disabled={act.isPending} onClick={() => setPaying(true)}><Send aria-hidden /> Record {formatKes(p.netCents)} as paid</Button>}
             {p.status === "on_hold" ? (
               <Button variant="outline" disabled={act.isPending} onClick={() => run(() => endpoints.unholdPayout(p.id, ""))}>Take off hold</Button>
             ) : (
