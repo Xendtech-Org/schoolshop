@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { Link, NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router"
 import { Menu, Search, ShoppingCart, X } from "lucide-react"
 
@@ -134,30 +134,73 @@ export function PublicLayout() {
   )
 }
 
-/** Product search, always in the header. Submitting opens the Shop page filtered by the text. */
+/** Product search, always in the header. Typing filters the Shop after a pause; Enter searches immediately. */
 function HeaderSearch({ id, className }: { id: string; className?: string }) {
+  const { pathname, search: locationSearch } = useLocation()
   const navigate = useNavigate()
-  const { pathname } = useLocation()
   const [params] = useSearchParams()
   // On the Shop page, show the active search so it can be edited or cleared.
   const current = pathname === "/shop" ? (params.get("search") ?? "") : ""
+  return (
+    <HeaderSearchInput
+      key={`${pathname}:${current}`}
+      id={id}
+      className={className}
+      current={current}
+      pathname={pathname}
+      locationSearch={locationSearch}
+      searchParams={params.toString()}
+      navigate={navigate}
+    />
+  )
+}
+
+function HeaderSearchInput({
+  id,
+  className,
+  current,
+  pathname,
+  locationSearch,
+  searchParams,
+  navigate,
+}: {
+  id: string
+  className?: string
+  current: string
+  pathname: string
+  locationSearch: string
+  searchParams: string
+  navigate: ReturnType<typeof useNavigate>
+}) {
+  const [value, setValue] = useState(current)
+  const navigateToSearch = useCallback((text: string, replace: boolean) => {
+    const next = new URLSearchParams(pathname === "/shop" ? searchParams : undefined)
+    if (text) next.set("search", text)
+    else next.delete("search")
+    const qs = next.toString()
+    const target = qs ? `/shop?${qs}` : "/shop"
+    if (`${pathname}${locationSearch}` !== target) navigate(target, { replace })
+  }, [locationSearch, navigate, pathname, searchParams])
+
+  useEffect(() => {
+    const text = value.trim()
+    if (text === current.trim()) return
+    const timer = window.setTimeout(() => navigateToSearch(text, true), 350)
+    return () => window.clearTimeout(timer)
+  }, [value, current, navigateToSearch])
+
   return (
     <form
       role="search"
       className={cn("relative", className)}
       onSubmit={(e) => {
         e.preventDefault()
-        const text = String(new FormData(e.currentTarget).get("search") ?? "").trim()
-        const next = new URLSearchParams(pathname === "/shop" ? params : undefined)
-        if (text) next.set("search", text)
-        else next.delete("search")
-        const qs = next.toString()
-        navigate(qs ? `/shop?${qs}` : "/shop")
+        navigateToSearch(value.trim(), false)
       }}
     >
       <label htmlFor={id} className="sr-only">Search products</label>
       <Search className="pointer-events-none absolute top-1/2 left-3.5 size-4.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
-      <Input key={current} id={id} name="search" type="search" defaultValue={current} autoComplete="off" enterKeyHint="search" placeholder="Search titles, subjects, publishers" className="h-10 rounded-full pl-10 text-sm md:text-sm" />
+      <Input id={id} name="search" type="search" value={value} onChange={(e) => setValue(e.target.value)} autoComplete="off" enterKeyHint="search" placeholder="Search titles, subjects, publishers" className="h-10 rounded-full pl-10 text-sm md:text-sm" />
     </form>
   )
 }
