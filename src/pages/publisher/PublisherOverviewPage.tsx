@@ -28,7 +28,7 @@ function Overview({ o }: { o: PublisherOverview }) {
         <StatCard label="Sales this term" value={formatKes(o.salesCents)} hint={`${count(o.packs, "pack")} for ${count(o.schools, "school")}`} />
         <StatCard label="Ready to dispatch" value={count(o.batches.readyToPack, "school")} hint={`${o.batches.collecting} still collecting orders`} />
         <StatCard label="On the way" value={count(o.batches.dispatched, "delivery")} hint={`${o.batches.received} received by schools`} />
-        <StatCard label="Live titles" value={o.catalog.live.toLocaleString("en-KE")} hint={`SchoolShop keeps ${rate}% of sales`} />
+        <StatCard label="Published titles" value={o.catalog.live.toLocaleString("en-KE")} hint={`SchoolShop keeps ${rate}% of sales`} />
       </section>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -112,9 +112,7 @@ function Overview({ o }: { o: PublisherOverview }) {
           <CardContent>
             <dl className="grid grid-cols-2 gap-3">
               {[
-                ["Live", o.catalog.live],
-                ["In review", o.catalog.inReview],
-                ["Changes asked for", o.catalog.changesRequested],
+                ["Published", o.catalog.live],
                 ["Low on stock", o.catalog.lowStock],
               ].map(([label, n]) => (
                 <div key={label} className="rounded-xl bg-paper p-3">

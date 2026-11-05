@@ -16,8 +16,7 @@ const messageFor = (e: unknown, ...fields: string[]) => {
 }
 
 /**
- * A title's cover, the documents SchoolShop asks for when it reviews the title,
- * and the digital resources that come with it. Each upload saves straight away.
+ * A title's cover and the digital resources that come with it. Each upload saves straight away.
  */
 export function TitleUploads({ itemId }: { itemId: string }) {
   const catalog = useCatalog()
@@ -30,14 +29,6 @@ export function TitleUploads({ itemId }: { itemId: string }) {
         <p className="text-sm text-muted-foreground">These save as soon as you upload them.</p>
       </div>
       <CoverUpload item={item} />
-      <FilesUpload
-        item={item}
-        kind="document"
-        title="For SchoolShop's review"
-        hint="E.g. the KICD approval letter or sample pages. Only SchoolShop sees these. PDF, JPG or PNG, up to 10 MB."
-        placeholder="KICD approval letter"
-        accept=".pdf,.jpg,.jpeg,.png"
-      />
       <FilesUpload
         item={item}
         kind="resource"

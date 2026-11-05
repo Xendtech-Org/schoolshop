@@ -299,6 +299,22 @@ export type ProductDetail = z.infer<typeof productDetailSchema>
 
 export const gradeBandSchema = z.enum(["pp", "1-3", "4-6", "7-9", "all"])
 
+const takenDownSchema = z.object({ at: isoDateTime, reason: z.string() })
+
+/** A product as SchoolShop staff see it, to take it out of the shop or restore it. */
+export const adminProductSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  publisherName: z.string(),
+  gradeLabel: z.string(),
+  isbn: z.string().nullable(),
+  priceCents: cents,
+  coverUrl: z.url().nullable(),
+  status: z.enum(["live", "draft"]),
+  takenDown: takenDownSchema.nullable(),
+})
+export type AdminProduct = z.infer<typeof adminProductSchema>
+
 /** A title in a publisher's own catalog, with stock. Parents see it as a Product. */
 export const catalogItemSchema = z.object({
   id: z.string(),
@@ -317,10 +333,8 @@ export const catalogItemSchema = z.object({
   /** The uploaded cover, or null to show a coloured placeholder. */
   coverUrl: z.url().nullable().default(null),
   files: z.array(catalogFileSchema).default([]),
-  /** New titles wait for SchoolShop to check them before schools can see them. */
-  review: z
-    .object({ state: z.enum(["pending", "changes_requested", "rejected"]), note: z.string().nullable(), submittedAt: isoDateTime })
-    .nullish(),
+  /** SchoolShop took it out of the shop. The publisher can't publish it until SchoolShop restores it. */
+  takenDown: takenDownSchema.nullish(),
 })
 export type CatalogItem = z.infer<typeof catalogItemSchema>
 
@@ -330,6 +344,15 @@ export const catalogDeleteResultSchema = z.object({
   kept: z.array(z.object({ id: z.string(), title: z.string(), reason: z.string() })),
 })
 export type CatalogDeleteResult = z.infer<typeof catalogDeleteResultSchema>
+
+export const catalogPublishResultSchema = z.object({
+  published: z.number().int().nonnegative(),
+  /** Already published. */
+  unchanged: z.number().int().nonnegative(),
+  /** Failed an automatic check, so they stay as they were. */
+  blocked: z.array(z.object({ id: z.string(), title: z.string(), reason: z.string() })),
+})
+export type CatalogPublishResult = z.infer<typeof catalogPublishResultSchema>
 
 export const schoolOverviewSchema = z.object({
   schoolName: z.string(),
@@ -787,32 +810,6 @@ export const adminRefundsSchema = z.object({
 })
 export type AdminRefunds = z.infer<typeof adminRefundsSchema>
 
-/** A title (or a price change) a publisher sent for SchoolShop to check. */
-export const catalogSubmissionSchema = z.object({
-  id: z.string(),
-  publisherId: z.string(),
-  publisherName: z.string(),
-  kind: z.enum(["new_title", "price_change"]),
-  title: z.string(),
-  subject: z.string(),
-  gradeLabel: z.string(),
-  isbn: z.string().nullable(),
-  format: z.string(),
-  priceCents: cents,
-  previousPriceCents: cents.nullable(),
-  submittedAt: isoDateTime,
-  status: z.enum(["pending", "changes_requested", "approved", "rejected"]),
-  note: z.string().nullable(),
-  /** Checked automatically when the title comes in. */
-  checks: z.array(z.object({ id: z.string(), label: z.string(), result: z.enum(["pass", "warn", "fail"]), detail: z.string() })),
-  similar: z.array(z.object({ title: z.string(), publisherName: z.string(), priceCents: cents })),
-  /** The title's cover and attached files, for the reviewer to check. */
-  coverUrl: z.url().nullable().default(null),
-  files: z.array(catalogFileSchema).default([]),
-  history: z.array(z.object({ id: z.string(), at: isoDateTime, actor: z.string(), text: z.string() })),
-})
-export type CatalogSubmission = z.infer<typeof catalogSubmissionSchema>
-
 export const auditCategorySchema = z.enum(["organisations", "orders", "money", "catalog", "staff", "settings"])
 export type AuditCategory = z.infer<typeof auditCategorySchema>
 /** One thing someone at SchoolShop did. Written by the server; nobody can edit or delete it. */
@@ -892,7 +889,7 @@ export const publisherOverviewSchema = z.object({
   batches: z.object({ collecting: z.number().int(), readyToPack: z.number().int(), dispatched: z.number().int(), received: z.number().int() }),
   /** Schools whose packs are ready to go, soonest due first. */
   toDispatch: z.array(z.object({ id: z.string(), schoolName: z.string(), town: z.string(), packs: z.number().int(), dueAtSchool: isoDate })),
-  catalog: z.object({ live: z.number().int(), inReview: z.number().int(), changesRequested: z.number().int(), lowStock: z.number().int() }),
+  catalog: z.object({ live: z.number().int(), lowStock: z.number().int() }),
   /** Best sellers this term, by sales. */
   topTitles: z.array(z.object({ title: z.string(), qty: z.number().int(), salesCents: cents })),
   alerts: z.array(z.object({ id: z.string(), severity: z.enum(["high", "medium", "info"]), title: z.string(), detail: z.string(), href: z.string() })),

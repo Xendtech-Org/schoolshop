@@ -9,7 +9,6 @@ import {
   adminRefundsSchema,
   platformSettingsSchema,
   auditEntrySchema,
-  catalogSubmissionSchema,
   collectionSchema,
   adminOrderSummarySchema,
   adminOrgSchema,
@@ -20,6 +19,8 @@ import {
   authTokensSchema,
   booklistSchema,
   catalogDeleteResultSchema,
+  adminProductSchema,
+  catalogPublishResultSchema,
   catalogImportResultSchema,
   catalogItemSchema,
   childSchema,
@@ -261,6 +262,8 @@ export const updateCatalogItem = async (id: string, input: Partial<CatalogItemIn
 }
 /** Products on a school's booklist are kept and listed in the result. */
 export const deleteCatalogItems = (ids: string[]) => post("/publisher/catalog/delete/", catalogDeleteResultSchema, { ids })
+/** Each title is checked on its own: one that fails a check stays as it was, and the result says why. */
+export const publishCatalogItems = (ids: string[]) => post("/publisher/catalog/publish/", catalogPublishResultSchema, { ids })
 
 async function upload<T extends z.ZodType>(url: string, schema: T, fields: Record<string, string | Blob>) {
   const form = new FormData()
@@ -347,11 +350,9 @@ export async function savePlatformSettings<K extends SettingsSection>(section: K
   const { data } = await api.put(`/admin/settings/${section}/`, value)
   return platformSettingsSchema.parse(data)
 }
-export const listCatalogSubmissions = () => get("/admin/catalog/", z.array(catalogSubmissionSchema))
-export type CatalogDecision = "approve" | "request-changes" | "reject"
-/** Approving puts the title (or new price) in front of schools; the publisher hears either way. */
-export const decideSubmission = (id: string, decision: CatalogDecision, note: string) =>
-  post(`/admin/catalog/${id}/${decision}/`, z.array(catalogSubmissionSchema), { note })
+export const listAdminProducts = (search: string) => get("/admin/products/", z.array(adminProductSchema), { search })
+export const takeDownProduct = (id: string, reason: string) => post(`/admin/products/${id}/take-down/`, adminProductSchema, { reason })
+export const restoreProduct = (id: string) => post(`/admin/products/${id}/restore/`, adminProductSchema)
 export const listAudit = () => get("/admin/audit/", z.array(auditEntrySchema))
 export const getAdminRefunds = () => get("/admin/refunds/", adminRefundsSchema)
 /** Pays back each order's requested items to the M-Pesa number that paid. */
