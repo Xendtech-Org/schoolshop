@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Dialog } from "radix-ui"
-import { AlertTriangle, Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react"
+import { AlertTriangle, Pencil, Plus, Search, Send, Trash2, Upload, X } from "lucide-react"
 import { z } from "zod"
 
 import { TitleUploads } from "@/components/catalog/TitleUploads"
@@ -17,8 +17,8 @@ import { NativeSelect } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { ApiError } from "@/lib/api/client"
 import type { CatalogItemInput } from "@/lib/api/endpoints"
-import { useCatalog, useDeleteCatalogItems, useImportPriceList, useSaveCatalogItem } from "@/lib/api/queries"
-import type { CatalogDeleteResult, CatalogImportResult, CatalogItem } from "@/lib/api/schemas"
+import { useCatalog, useDeleteCatalogItems, useImportPriceList, usePublishCatalogItems, useSaveCatalogItem } from "@/lib/api/queries"
+import type { CatalogDeleteResult, CatalogImportResult, CatalogItem, CatalogPublishResult } from "@/lib/api/schemas"
 import { formatKes } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
@@ -34,7 +34,7 @@ function stockState(item: CatalogItem): StockState {
 }
 
 const stateBadge: Record<StockState, { label: string; variant: "success" | "warning" | "destructive" | "secondary" }> = {
-  live: { label: "Live", variant: "success" },
+  live: { label: "Published", variant: "success" },
   low: { label: "Low stock", variant: "warning" },
   out: { label: "Out of stock", variant: "destructive" },
   draft: { label: "Draft", variant: "secondary" },
@@ -46,7 +46,7 @@ const reviewBadge = {
   rejected: { label: "Not approved", variant: "destructive" },
 } as const
 
-/** New titles show where they are in SchoolShop's review until they go live. */
+/** New titles show where they are in SchoolShop's review until they're published. */
 function ItemBadge({ item, st }: { item: CatalogItem; st: StockState }) {
   const b = item.review ? reviewBadge[item.review.state] : stateBadge[st]
   return <Badge variant={b.variant}>{b.label}</Badge>
@@ -54,7 +54,7 @@ function ItemBadge({ item, st }: { item: CatalogItem; st: StockState }) {
 
 const filters: { id: "all" | StockState; label: string }[] = [
   { id: "all", label: "All" },
-  { id: "live", label: "Live" },
+  { id: "live", label: "Published" },
   { id: "low", label: "Low stock" },
   { id: "out", label: "Out of stock" },
   { id: "draft", label: "Drafts" },
@@ -98,6 +98,8 @@ function Catalog({ items }: { items: CatalogItem[] }) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [confirming, setConfirming] = useState(false)
   const [deleted, setDeleted] = useState<CatalogDeleteResult | null>(null)
+  const publish = usePublishCatalogItems()
+  const [published, setPublished] = useState<CatalogPublishResult | null>(null)
 
   const counts = useMemo(() => {
     const c = { all: items.length, live: 0, low: 0, out: 0, draft: 0 }
@@ -153,7 +155,7 @@ function Catalog({ items }: { items: CatalogItem[] }) {
       />
 
       <section aria-label="Key numbers" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Live titles" value={counts.live + counts.low} hint={plural(counts.draft, "draft")} />
+        <StatCard label="Published titles" value={counts.live + counts.low} hint={plural(counts.draft, "draft")} />
         <StatCard label="Low stock" value={counts.low} hint="At or below your alert level" />
         <StatCard label="Out of stock" value={counts.out} hint="Parents can't order these" />
         <StatCard label="On school lists" value={placements} hint="Booklists using your titles" />
@@ -210,10 +212,19 @@ function Catalog({ items }: { items: CatalogItem[] }) {
         </div>
 
         {deleted && <DeleteNotice result={deleted} onClose={() => setDeleted(null)} />}
+        {published && <PublishNotice result={published} onClose={() => setPublished(null)} />}
+        {publish.error && <p role="alert" className="text-sm font-medium text-destructive">{publish.error.message}</p>}
 
         {chosen.length > 0 ? (
           <div role="region" aria-label="Selected products" className="flex flex-wrap items-center gap-3 rounded-xl bg-secondary px-4 py-2.5">
             <span className="text-sm font-semibold" aria-live="polite">{plural(chosen.length, "product")} selected</span>
+            <Button
+              size="sm"
+              disabled={publish.isPending || !chosen.some((i) => i.status === "draft")}
+              onClick={() => publish.mutate(chosen.map((i) => i.id), { onSuccess: (result) => { setPublished(result); setSelected(new Set()) } })}
+            >
+              <Send aria-hidden /> {publish.isPending ? "Publishing…" : "Publish"}
+            </Button>
             <Button variant="outline" size="sm" className="text-destructive" onClick={() => setConfirming(true)}>
               <Trash2 aria-hidden /> Delete
             </Button>
@@ -333,7 +344,7 @@ function Catalog({ items }: { items: CatalogItem[] }) {
   )
 }
 
-/* ── Selecting and deleting ──────────────────────────────────── */
+/* ── Selecting, publishing and deleting ──────────────────────── */
 
 function Checkbox({ checked, indeterminate = false, onChange, label }: { checked: boolean; indeterminate?: boolean; onChange: () => void; label: string }) {
   return (
@@ -374,7 +385,7 @@ function DeleteDialog({ items, onClose, onDone }: { items: CatalogItem[]; onClos
           </ul>
           {listed.length > 0 && (
             <p className="rounded-xl bg-warn-bg px-4 py-3 text-sm text-warn-fg">
-              {plural(listed.length, "product")} {listed.length === 1 ? "is" : "are"} on school booklists and will be kept. Untick Live to hide {listed.length === 1 ? "it" : "them"} instead.
+              {plural(listed.length, "product")} {listed.length === 1 ? "is" : "are"} on school booklists and will be kept. Save {listed.length === 1 ? "it as a draft" : "them as drafts"} to hide {listed.length === 1 ? "it" : "them"} instead.
             </p>
           )}
           {error && <p role="alert" className="text-sm font-medium text-destructive">{error}</p>}
@@ -412,6 +423,20 @@ function DeleteNotice({ result, onClose }: { result: CatalogDeleteResult; onClos
   )
 }
 
+function PublishNotice({ result, onClose }: { result: CatalogPublishResult; onClose: () => void }) {
+  const parts = [
+    result.published > 0 && `Published ${plural(result.published, "product")}.`,
+    result.sentForReview > 0 && `Sent ${plural(result.sentForReview, "new product")} to SchoolShop to check, usually within a working day.`,
+    result.unchanged > 0 && `${plural(result.unchanged, "product")} already published or in review.`,
+  ].filter(Boolean)
+  return (
+    <div role="status" className="flex items-start gap-3 rounded-xl bg-success-bg px-4 py-3 text-sm">
+      <span className="grow font-semibold">{parts.join(" ")}</span>
+      <Button variant="ghost" size="sm" aria-label="Dismiss" onClick={onClose}><X aria-hidden /></Button>
+    </div>
+  )
+}
+
 function Cover({ item }: { item: CatalogItem }) {
   if (item.coverUrl) return <img src={item.coverUrl} alt="" className="h-12 w-9 shrink-0 rounded-md border object-cover" />
   const tone = coverTones[[...item.subject].reduce((s, ch) => s + ch.charCodeAt(0), 0) % coverTones.length]
@@ -436,7 +461,6 @@ const titleSchema = z.object({
   price: z.string().trim().regex(/^[1-9]\d*$/, "Enter a price in whole shillings"),
   stock: wholeNumber,
   lowStockAt: wholeNumber,
-  visible: z.boolean(),
 })
 type TitleValues = z.infer<typeof titleSchema>
 
@@ -451,9 +475,8 @@ function toValues(item: CatalogItem | null): TitleValues {
         price: String(item.priceCents / 100),
         stock: String(item.stock),
         lowStockAt: String(item.lowStockAt),
-        visible: item.status === "live",
       }
-    : { title: "", subject: "", gradeLabel: "", isbn: "", format: formats[0], price: "", stock: "0", lowStockAt: "100", visible: true }
+    : { title: "", subject: "", gradeLabel: "", isbn: "", format: formats[0], price: "", stock: "0", lowStockAt: "100" }
 }
 
 function TitleSheet({ editing, onClose, onCreated }: { editing: CatalogItem | "new" | null; onClose: () => void; onCreated: (item: CatalogItem) => void }) {
@@ -473,7 +496,7 @@ function TitleSheet({ editing, onClose, onCreated }: { editing: CatalogItem | "n
             <div className="flex flex-col gap-1">
               <Dialog.Title className="font-display text-xl font-semibold">{item ? "Edit product" : "Add a product"}</Dialog.Title>
               <Dialog.Description className="text-sm text-muted-foreground">
-                {item ? `On ${plural(item.schoolListCount, "school list")}.` : "Schools can add it to their booklists once it's live."}
+                {item ? `On ${plural(item.schoolListCount, "school list")}.` : "Schools can add it to their booklists once it's published."}
               </Dialog.Description>
             </div>
             <Dialog.Close asChild>
@@ -491,7 +514,7 @@ function TitleForm({ item, onDone, onCreated }: { item: CatalogItem | null; onDo
   const form = useForm<TitleValues>({ resolver: zodResolver(titleSchema), defaultValues: toValues(item) })
   const save = useSaveCatalogItem()
 
-  const submit = form.handleSubmit((v) => {
+  const submit = (status: "live" | "draft") => form.handleSubmit((v) => {
     const input: CatalogItemInput = {
       title: v.title,
       subject: v.subject,
@@ -502,7 +525,7 @@ function TitleForm({ item, onDone, onCreated }: { item: CatalogItem | null; onDo
       priceCents: Number(v.price) * 100,
       stock: Number(v.stock),
       lowStockAt: Number(v.lowStockAt),
-      status: v.visible ? "live" : "draft",
+      status,
     }
     save.mutate(
       { id: item?.id, input },
@@ -519,7 +542,7 @@ function TitleForm({ item, onDone, onCreated }: { item: CatalogItem | null; onDo
 
   return (
     <Form {...form}>
-      <form noValidate onSubmit={submit} className="flex flex-col gap-4 px-6 py-5">
+      <form noValidate onSubmit={(e) => e.preventDefault()} className="flex flex-col gap-4 px-6 py-5">
         <FormField control={form.control} name="title" render={({ field }) => (
           <FormItem>
             <FormLabel>Title</FormLabel>
@@ -587,17 +610,6 @@ function TitleForm({ item, onDone, onCreated }: { item: CatalogItem | null; onDo
             <FormMessage />
           </FormItem>
         )} />
-        <FormField control={form.control} name="visible" render={({ field }) => (
-          <FormItem>
-            <label className="flex cursor-pointer items-start gap-3 rounded-xl border p-3.5">
-              <input type="checkbox" checked={field.value} onChange={(e) => field.onChange(e.target.checked)} className="mt-0.5 size-5 accent-[var(--teal)]" />
-              <span className="flex flex-col gap-0.5">
-                <span className="font-semibold">Live</span>
-                <span className="text-sm text-muted-foreground">Schools can find it and add it to booklists. Anything new goes live once SchoolShop has checked it, usually within a working day. Untick to keep it as a draft.</span>
-              </span>
-            </label>
-          </FormItem>
-        )} />
         {item ? (
           <TitleUploads itemId={item.id} />
         ) : (
@@ -606,12 +618,15 @@ function TitleForm({ item, onDone, onCreated }: { item: CatalogItem | null; onDo
         {form.formState.errors.root && (
           <p role="alert" className="text-sm font-medium text-destructive">{form.formState.errors.root.message}</p>
         )}
+        <p className="text-sm text-muted-foreground">
+          Publish lets schools find it and add it to booklists. Anything new goes to SchoolShop to check first, usually within a working day. A draft stays hidden from schools and parents.
+        </p>
         <div className="sticky bottom-0 -mx-6 mt-2 flex gap-3 border-t bg-surface px-6 py-4">
-          <Dialog.Close asChild>
-            <Button type="button" variant="outline" size="lg" className="grow">Cancel</Button>
-          </Dialog.Close>
-          <Button type="submit" size="lg" className="grow" disabled={save.isPending}>
-            {save.isPending ? "Saving…" : item ? "Save changes" : "Add product"}
+          <Button type="button" variant="outline" size="lg" className="grow" disabled={save.isPending} onClick={submit("draft")}>
+            {save.isPending && save.variables?.input.status === "draft" ? "Saving…" : "Save as draft"}
+          </Button>
+          <Button type="button" size="lg" className="grow" disabled={save.isPending} onClick={submit("live")}>
+            {save.isPending && save.variables?.input.status === "live" ? "Publishing…" : "Publish"}
           </Button>
         </div>
       </form>

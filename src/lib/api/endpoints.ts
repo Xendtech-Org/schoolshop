@@ -20,6 +20,7 @@ import {
   authTokensSchema,
   booklistSchema,
   catalogDeleteResultSchema,
+  catalogPublishResultSchema,
   catalogImportResultSchema,
   catalogItemSchema,
   childSchema,
@@ -261,6 +262,8 @@ export const updateCatalogItem = async (id: string, input: Partial<CatalogItemIn
 }
 /** Products on a school's booklist are kept and listed in the result. */
 export const deleteCatalogItems = (ids: string[]) => post("/publisher/catalog/delete/", catalogDeleteResultSchema, { ids })
+/** Approved titles go public straight away; anything new goes to SchoolShop to check first. */
+export const publishCatalogItems = (ids: string[]) => post("/publisher/catalog/publish/", catalogPublishResultSchema, { ids })
 
 async function upload<T extends z.ZodType>(url: string, schema: T, fields: Record<string, string | Blob>) {
   const form = new FormData()

@@ -225,6 +225,17 @@ function syncSchoolRow(o: Order) {
 const refundLog: RefundRecord[] = db.refundLogSeed.map((r) => ({ ...r }))
 const actorName = (userId: string | null) => usersById().find((u) => u.id === userId)?.name ?? "SchoolShop"
 
+/** A title the publisher wants schools to see waits for SchoolShop to check it first. */
+function sendForReview(item: CatalogItem) {
+  const at = new Date().toISOString().replace(/\.\d+Z$/, "+00:00")
+  Object.assign(item, { status: "draft", review: { state: "pending", note: null, submittedAt: at } })
+  submissions.set(`sub-${item.id}`, {
+    id: `sub-${item.id}`, catalogId: item.id, publisherId: "pub-longhorn", publisherName: "Longhorn Publishers", kind: "new_title", title: item.title, subject: item.subject, gradeLabel: item.gradeLabel,
+    isbn: item.isbn, format: item.format, priceCents: item.priceCents, previousPriceCents: null, submittedAt: at, status: "pending", note: null,
+    history: [{ id: "sent", at, actor: "Longhorn Publishers", text: "sent a new title" }],
+  })
+}
+
 /** The parent's own order: which lines they can still ask to have refunded (the limit in Fees & settings → Refunds). */
 function parentOrder(o: Order): Order {
   const late = platform.refunds.parentRequestsUntil === "dispatched" ? ["dispatched", "received"] : ["received"]
@@ -1645,13 +1656,23 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     if (!ids.length) throw new HttpError(400, { ids: ["Choose at least one product."] })
     const found = ids.map((id) => catalog.get(id)).filter((c): c is CatalogItem => !!c)
     if (!found.length) throw notFound()
-    const kept = found.filter((c) => c.schoolListCount > 0).map((c) => ({ id: c.id, title: c.title, reason: "It's on a school booklist, so it can't be deleted. Untick Live to hide it instead." }))
+    const kept = found.filter((c) => c.schoolListCount > 0).map((c) => ({ id: c.id, title: c.title, reason: "It's on a school booklist, so it can't be deleted. Save it as a draft to hide it instead." }))
     for (const c of found) {
       if (c.schoolListCount > 0) continue
       catalog.delete(c.id)
       for (const [id, x] of submissions) if (x.catalogId === c.id && (x.status === "pending" || x.status === "changes_requested")) submissions.delete(id)
     }
     return { deleted: found.length - kept.length, kept }
+  }],
+  ["post", "/publisher/catalog/publish/", ({ body }) => {
+    const ids = (body.ids as string[] | undefined) ?? []
+    if (!ids.length) throw new HttpError(400, { ids: ["Choose at least one product."] })
+    const found = ids.map((id) => catalog.get(id)).filter((c): c is CatalogItem => !!c)
+    if (!found.length) throw notFound()
+    // The mock doesn't record which drafts SchoolShop approved, so every draft goes for review.
+    const drafts = found.filter((c) => c.status === "draft" && c.review?.state !== "pending")
+    for (const c of drafts) sendForReview(c)
+    return { published: 0, sentForReview: drafts.length, unchanged: found.length - drafts.length }
   }],
   ["post", "/publisher/catalog/import/", ({ body }) => {
     const file = body.file as File | undefined
@@ -1733,16 +1754,7 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     const isbn = body.isbn ? String(body.isbn) : null
     if (isbn && [...catalog.values()].some((c) => c.isbn === isbn)) throw new HttpError(400, { isbn: ["A title with this ISBN is already in your catalog."] })
     const item: CatalogItem = { ...(body as Omit<CatalogItem, "id" | "schoolListCount" | "coverUrl" | "files">), isbn, id: `cat-${++catalogSeq}`, schoolListCount: 0, coverUrl: null, files: [], review: null }
-    // A title the publisher wants schools to see waits for SchoolShop to check it first.
-    if (item.status === "live") {
-      const at = new Date().toISOString().replace(/\.\d+Z$/, "+00:00")
-      Object.assign(item, { status: "draft", review: { state: "pending", note: null, submittedAt: at } })
-      submissions.set(`sub-${item.id}`, {
-        id: `sub-${item.id}`, catalogId: item.id, publisherId: "pub-longhorn", publisherName: "Longhorn Publishers", kind: "new_title", title: item.title, subject: item.subject, gradeLabel: item.gradeLabel,
-        isbn: item.isbn, format: item.format, priceCents: item.priceCents, previousPriceCents: null, submittedAt: at, status: "pending", note: null,
-        history: [{ id: "sent", at, actor: "Longhorn Publishers", text: "sent a new title" }],
-      })
-    }
+    if (item.status === "live") sendForReview(item)
     catalog.set(item.id, item)
     return item
   }],

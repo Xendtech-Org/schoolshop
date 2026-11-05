@@ -331,6 +331,16 @@ export const catalogDeleteResultSchema = z.object({
 })
 export type CatalogDeleteResult = z.infer<typeof catalogDeleteResultSchema>
 
+export const catalogPublishResultSchema = z.object({
+  /** Approved titles that are now public. */
+  published: z.number().int().nonnegative(),
+  /** Anything new, which SchoolShop checks first. */
+  sentForReview: z.number().int().nonnegative(),
+  /** Already public, or already waiting for review. */
+  unchanged: z.number().int().nonnegative(),
+})
+export type CatalogPublishResult = z.infer<typeof catalogPublishResultSchema>
+
 export const schoolOverviewSchema = z.object({
   schoolName: z.string(),
   termName: z.string(),
