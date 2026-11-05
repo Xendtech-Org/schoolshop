@@ -25,12 +25,14 @@ const statusMeta: Record<Status, { label: string; variant: "info" | "warning" | 
   held: { label: "On the way", variant: "secondary" },
   on_hold: { label: "On hold", variant: "warning" },
   queued: { label: "Queued", variant: "info" },
+  processing: { label: "Processing", variant: "info" },
   paid: { label: "Paid", variant: "success" },
 }
 
 const filters: { id: "all" | Status; label: string }[] = [
   { id: "all", label: "All" },
   { id: "queued", label: "Queued" },
+  { id: "processing", label: "Processing" },
   { id: "on_hold", label: "On hold" },
   { id: "held", label: "On the way" },
   { id: "paid", label: "Paid" },
@@ -39,6 +41,7 @@ const filters: { id: "all" | Status; label: string }[] = [
 const methodLabel: Record<PayoutAccount["method"], string> = {
   mpesa_paybill: "M-Pesa Paybill",
   mpesa_till: "M-Pesa Till",
+  mpesa_mobile: "M-Pesa mobile",
   bank: "Bank transfer",
 }
 
@@ -74,7 +77,8 @@ function Payouts({ data }: { data: PublisherPayouts }) {
 
       <section aria-label="Key numbers" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard label="Paid out" value={formatKes(sum(by("paid"), "netCents"))} hint={`${by("paid").length} payouts`} />
-        <StatCard label="Queued" value={formatKes(sum(by("queued"), "netCents"))} hint="Approved, sending next" />
+        <StatCard label="Queued" value={formatKes(sum(by("queued"), "netCents"))} hint="Ready for release" />
+        <StatCard label="Processing" value={formatKes(sum(by("processing"), "netCents"))} hint="Waiting for M-Pesa confirmation" />
         <StatCard label="On hold" value={formatKes(sum(by("on_hold"), "netCents"))} hint="A school flagged an issue" />
         <StatCard label="On the way" value={formatKes(sum(by("held"), "netCents"))} hint="Released when the school confirms" />
       </section>
@@ -257,7 +261,7 @@ function PayoutDetails({ payout: p, rate, account, onClose }: { payout: Payout |
   const steps: { label: string; done: boolean; when?: string }[] = p
     ? [
         { label: "Delivered and confirmed by the school", done: !!p.receivedAt, when: p.receivedAt ? formatDay(p.receivedAt) : undefined },
-        { label: p.status === "on_hold" ? "Waiting for the issue to be resolved" : "Approved for payout", done: p.status === "queued" || p.status === "paid" },
+        { label: p.status === "on_hold" ? "Waiting for the issue to be resolved" : "Approved for payout", done: p.status === "queued" || p.status === "processing" || p.status === "paid" },
         { label: `Sent to your ${methodLabel[account.method]}`, done: p.status === "paid", when: p.paidAt ? formatDay(p.paidAt) : undefined },
       ]
     : []
@@ -282,6 +286,11 @@ function PayoutDetails({ payout: p, rate, account, onClose }: { payout: Payout |
             <p className="flex items-start gap-2.5 rounded-xl bg-warn-bg p-3.5 text-sm text-warn-fg">
               <AlertTriangle className="mt-0.5 size-4.5 shrink-0" aria-hidden />
               The school reported a problem with this delivery. SchoolShop will contact you, and the payout is released once it's resolved.
+            </p>
+          )}
+          {p.status === "processing" && (
+            <p className="rounded-xl bg-info-bg p-3.5 text-sm">
+              SasaPay is processing this automatic payout. It will show as paid after M-Pesa confirms the transfer.
             </p>
           )}
           <ol className="flex flex-col gap-3" aria-label="Progress">
@@ -312,20 +321,25 @@ function PayoutDetails({ payout: p, rate, account, onClose }: { payout: Payout |
 
 const accountSchema = z
   .object({
-    method: z.enum(["mpesa_paybill", "mpesa_till", "bank"]),
+    method: z.enum(["mpesa_paybill", "mpesa_till", "mpesa_mobile", "bank"]),
     accountName: z.string().trim().min(3, "Enter the registered account name"),
-    number: z.string().trim().regex(/^\d{5,16}$/, "Enter digits only, no spaces"),
+    number: z.string().trim(),
     reference: z.string().trim(),
   })
-  .refine((v) => v.method === "mpesa_till" || v.reference.length >= 2, {
+  .refine((v) => v.method === "mpesa_till" || v.method === "mpesa_mobile" || v.reference.length >= 2, {
     path: ["reference"],
     message: "This is required",
+  })
+  .refine((v) => v.method === "mpesa_mobile" ? /^(?:\+?254|0)?[17]\d{8}$/.test(v.number) : /^\d{5,16}$/.test(v.number), {
+    path: ["number"],
+    message: "Enter a valid Kenyan mobile number, e.g. 0712345678",
   })
 type AccountValues = z.infer<typeof accountSchema>
 
 const methodFields: Record<AccountValues["method"], { number: string; reference: string | null; hint: string }> = {
   mpesa_paybill: { number: "Paybill number", reference: "Account number", hint: "We pay by M-Pesa B2B to your Paybill." },
   mpesa_till: { number: "Till number", reference: null, hint: "We pay by M-Pesa B2B to your Buy Goods till." },
+  mpesa_mobile: { number: "M-Pesa mobile number", reference: null, hint: "Eligible verified mobile accounts can receive automatic payouts through SasaPay." },
   bank: { number: "Account number", reference: "Bank and branch", hint: "Bank transfers can take a working day longer." },
 }
 

@@ -28,9 +28,10 @@ import { cn } from "@/lib/utils"
  */
 
 type Tab = "payouts" | "collections"
-type PayoutShow = "queued" | "on_hold" | "held" | "paid" | "all"
+type PayoutShow = "queued" | "processing" | "on_hold" | "held" | "paid" | "all"
 const payoutShows: { id: PayoutShow; label: string }[] = [
   { id: "queued", label: "Ready to release" },
+  { id: "processing", label: "Processing" },
   { id: "on_hold", label: "On hold" },
   { id: "held", label: "Waiting for delivery" },
   { id: "paid", label: "Paid" },
@@ -38,6 +39,7 @@ const payoutShows: { id: PayoutShow; label: string }[] = [
 ]
 const payoutStatus: Record<AdminPayout["status"], [string, "success" | "warning" | "info" | "secondary"]> = {
   queued: ["Ready", "success"],
+  processing: ["Processing", "info"],
   on_hold: ["On hold", "warning"],
   held: ["Waiting for delivery", "info"],
   paid: ["Paid", "secondary"],
@@ -322,6 +324,7 @@ function PayoutDetail({ payout: p, mayRelease }: { payout: AdminPayout; mayRelea
       </div>
       {p.status === "on_hold" && p.holdReason && <p className="rounded-xl bg-warn-bg px-4 py-3 text-sm text-warn-fg"><span className="font-semibold">On hold.</span> {p.holdReason}</p>}
       {p.status === "held" && <p className="rounded-xl bg-info-bg px-4 py-3 text-sm">{p.receivedAt ? `${p.schoolName} confirmed the delivery. It's ready to release once the hold days set in Fees & settings have passed.` : `This becomes ready to release once ${p.schoolName} confirms the delivery.`}</p>}
+      {p.status === "processing" && <p className="rounded-xl bg-info-bg px-4 py-3 text-sm">SasaPay has the transfer request. This payout will be marked paid only after the provider confirms the amount and transaction reference.</p>}
 
       <section aria-label="Breakdown" className="rounded-xl border">
         <dl className="divide-y text-sm">
@@ -343,7 +346,7 @@ function PayoutDetail({ payout: p, mayRelease }: { payout: AdminPayout; mayRelea
       </dl>
 
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-      {mayRelease && p.status !== "paid" && (
+      {mayRelease && (p.status === "queued" || p.status === "held" || p.status === "on_hold") && (
         paying ? (
           <form className="flex flex-col gap-3 rounded-xl border p-4" onSubmit={(e) => { e.preventDefault(); if (!reference.trim()) return setError("Enter the transaction reference."); run(() => endpoints.releasePayouts([{ id: p.id, reference: reference.trim() }])) }}>
             <label className="flex flex-col gap-1.5 text-sm font-medium">

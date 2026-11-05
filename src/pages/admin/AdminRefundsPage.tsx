@@ -228,7 +228,7 @@ function DisputesTab({ disputes, mayDecide, onNotice }: { disputes: Dispute[]; m
   return <>{disputes.map((d) => <DisputeCard key={d.id} d={d} mayDecide={mayDecide} onNotice={onNotice} />)}</>
 }
 
-const payoutLabel = { held: "waiting for delivery", on_hold: "on hold", queued: "ready to release", paid: "already paid" } as const
+const payoutLabel = { held: "waiting for delivery", on_hold: "on hold", queued: "ready to release", processing: "transfer processing", paid: "already paid" } as const
 
 function DisputeCard({ d, mayDecide, onNotice }: { d: Dispute; mayDecide: boolean; onNotice: (t: string) => void }) {
   const [replacing, setReplacing] = useState(false)
@@ -277,7 +277,7 @@ function DisputeCard({ d, mayDecide, onNotice }: { d: Dispute; mayDecide: boolea
           <section aria-label="Publisher payout" className="flex min-w-0 flex-col gap-1 rounded-xl bg-secondary/60 p-4 text-sm">
             <span className="text-[13px] text-muted-foreground">{d.publisherName}'s payout for this delivery</span>
             <span className="font-semibold">{formatKes(d.payout.netCents)} · {payoutLabel[d.payout.status]}</span>
-            <span className="text-[13px] text-muted-foreground">{resolved ? "" : d.payout.status === "paid" ? "A refund comes off their next payout." : "A refund comes off this payout. Settling takes it off hold."}</span>
+            <span className="text-[13px] text-muted-foreground">{resolved ? "" : d.payout.status === "paid" ? "A refund comes off their next payout." : d.payout.status === "processing" ? "Reconcile the in-progress transfer with SasaPay before attempting another release." : "A refund comes off this payout. Settling takes it off hold."}</span>
             <Link to={`/admin/payments?show=all&payout=${d.payout.id}`} className="mt-1 text-[13px] font-semibold text-accent-text hover:underline">Open the payout</Link>
           </section>
         )}

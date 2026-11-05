@@ -192,7 +192,7 @@ Please don't reverse these without asking the repo owner.
 | M-Pesa goes through SasaPay, not Daraja | The owner's choice. The field names in its callback came from third-party clients, so check them on the sandbox |
 | Cards use Stripe's or Paystack's hosted page | Card details never reach SchoolShop |
 | Provider keys are entered in the admin and encrypted | Keys are managed without touching the server's settings |
-| Finance sends publisher payouts by hand and records the reference | SasaPay's payout APIs couldn't be verified, and automatic transfers risk real money |
+| Publisher payouts can be automatic to verified M-Pesa mobile accounts through SasaPay, or manual for bank, Paybill, and Till accounts | Automated transfers require a provider-confirmed result; other payout account types remain under finance control |
 | A dispute refunds only the students staff tick | Schools count per class, so refunding a whole short class would over-refund |
 | No commission on refunded money | A deliberate change from the mock |
 | SMS goes through Onfon | The owner already uses it |
@@ -204,18 +204,16 @@ Please don't reverse these without asking the repo owner.
 
 ```mermaid
 flowchart LR
-    Q1{"Automatic payout<br/>release switch"} --> A1["Remove it (recommended)"]
-    Q1 --> A2["Build real transfers"]
-    Q2{"Sold-out item at<br/>time of payment"} --> B1["Refund request straight away<br/>(built this way)"]
-    Q2 --> B2["Publisher decides at dispatch"]
+    Q1{"Sold-out item at<br/>time of payment"} --> B1["Refund request straight away<br/>(built this way)"]
+    Q1 --> B2["Publisher decides at dispatch"]
 ```
 
-The release switch currently does nothing, though the admin page says payouts "go out". Settle the sold-out question before launch, because it decides whether parents get refunded automatically.
+Payout automation is available for verified M-Pesa mobile accounts via SasaPay; bank, Paybill, and Till payouts remain manual. Settle the sold-out question before launch, because it decides whether parents get refunded automatically.
 
 ### Checks before launch
 
 - [ ] Send a real text through Onfon. It has only been tested against a stand-in, and its docs don't state the phone format.
-- [ ] Try SasaPay on its sandbox: payments, callbacks and refunds.
+- [ ] Try SasaPay on its sandbox: parent payments, refunds, and automatic M-Pesa mobile payouts including callbacks.
 - [ ] Run the tests and the contract check on PostgreSQL. The latest run used SQLite, so row locking hasn't been tested.
 - [ ] Click through every role with mocks off, then run a whole term end to end. The steps are in the backend's `BUILD_PLAN.md`, phase 5.
 - [ ] Open the new parent screens in a browser: the refund request form and downloads.
@@ -231,7 +229,8 @@ Neither repo has deployment config yet, so step 8 still has to be written down. 
 - `orders` and the other migrations run;
 - `FIELD_ENCRYPTION_KEY`, `PUBLIC_API_URL`, `SMS_BACKEND=onfon` and the `ONFON_*` keys set;
 - provider webhooks added, as the backend README explains;
-- `python manage.py send_order_reminders` scheduled daily.
+- `python manage.py send_order_reminders` scheduled daily;
+- `python manage.py auto_release_payouts` scheduled daily if automatic payouts are enabled.
 
 ## Run it in 5 minutes
 

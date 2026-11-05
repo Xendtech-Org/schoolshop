@@ -336,7 +336,7 @@ function adminPayouts(): AdminPayout[] {
     ...payouts.payouts.filter((p) => p.termName === "Term 1, 2027").map((p) => ({ ...p, publisherId: "pub-longhorn", packs: Math.round(p.grossCents / 60_000) })),
     ...otherPayouts.map(({ holdReason: _h, ...p }) => p),
   ]
-  const order = { queued: 0, on_hold: 1, held: 2, paid: 3 }
+  const order = { processing: 0, queued: 1, on_hold: 2, held: 3, paid: 4 }
   return all
     .map((p) => {
       const rec = findPayout(p.id)
@@ -1629,12 +1629,17 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     return settings
   }],
   ["put", "/publisher/payout-account/", ({ body }) => {
-    const number = String(body.number ?? "").replace(/\s/g, "")
+    const rawNumber = String(body.number ?? "").replace(/\s/g, "")
     const method = body.method as PublisherPayouts["account"]["method"]
-    if (!/^\d{5,16}$/.test(number)) throw new HttpError(400, { number: ["Enter the number without spaces or dashes."] })
+    const mobileNumber = method === "mpesa_mobile" ? normaliseKenyanPhone(rawNumber) : null
+    const number = mobileNumber ?? rawNumber
+    if (method === "mpesa_mobile" ? !mobileNumber : !/^\d{5,16}$/.test(number)) {
+      throw new HttpError(400, { number: [method === "mpesa_mobile" ? "Enter a valid Kenyan mobile number, e.g. 0712345678" : "Enter the number without spaces or dashes."] })
+    }
     const tail = number.slice(-2)
     const masked =
-      method === "bank" ? `${String(body.reference)} · Account *** ${number.slice(-4)}`
+      method === "bank"       ? `${String(body.reference)} · Account *** ${number.slice(-4)}`
+      : method === "mpesa_mobile" && mobileNumber ? `M-Pesa ${mobileNumber.replace(/^254/, "0").slice(0, 4)} ••• ${mobileNumber.slice(-3)}`
       : method === "mpesa_till" ? `Till ${number.slice(0, 3)} *** ${tail}`
       : `Paybill ${number.slice(0, 3)} *** ${tail} · Account ${String(body.reference).toUpperCase()}`
     payouts.account = { method, accountName: String(body.accountName), masked, status: "pending_verification" }

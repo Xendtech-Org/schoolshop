@@ -469,9 +469,9 @@ export const schoolBatchSchema = z.object({
 export type SchoolBatch = z.infer<typeof schoolBatchSchema>
 
 export const payoutAccountSchema = z.object({
-  method: z.enum(["mpesa_paybill", "mpesa_till", "bank"]),
+  method: z.enum(["mpesa_paybill", "mpesa_till", "mpesa_mobile", "bank"]),
   accountName: z.string(),
-  /** Display string with the number partly hidden, e.g. "Paybill 522 *** 11 · Account LONGHORN". */
+  /** Display string with the number partly hidden. */
   masked: z.string(),
   status: z.enum(["verified", "pending_verification"]),
 })
@@ -492,7 +492,7 @@ export const payoutSchema = z.object({
   deductionNote: z.string().nullable(),
   netCents: cents,
   /** held: not yet received · on_hold: the school flagged an issue · queued: approved, not sent · paid */
-  status: z.enum(["held", "on_hold", "queued", "paid"]),
+  status: z.enum(["held", "on_hold", "queued", "processing", "paid"]),
   paidAt: isoDateTime.nullable(),
   reference: z.string().nullable(),
 })
@@ -762,7 +762,7 @@ export const disputeSchema = z.object({
   /** Parents' orders missing the publisher's items, with what refunding them would cost. */
   orders: z.array(z.object({ id: z.string(), number: z.string(), studentName: z.string(), className: z.string(), amountCents: cents, open: z.boolean(), refunded: z.boolean() })),
   refundCents: cents,
-  payout: z.object({ id: z.string(), status: z.enum(["held", "on_hold", "queued", "paid"]), netCents: cents }).nullable(),
+  payout: z.object({ id: z.string(), status: z.enum(["held", "on_hold", "queued", "processing", "paid"]), netCents: cents }).nullable(),
   events: z.array(z.object({ id: z.string(), at: isoDateTime, actor: z.string(), text: z.string() })),
 })
 export type Dispute = z.infer<typeof disputeSchema>

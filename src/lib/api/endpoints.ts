@@ -312,11 +312,11 @@ export const dispatchBatch = (id: string, input: DispatchInput) =>
 
 export const getPublisherPayouts = () => get("/publisher/payouts/", publisherPayoutsSchema)
 export type PayoutAccountInput = {
-  method: "mpesa_paybill" | "mpesa_till" | "bank"
+  method: "mpesa_paybill" | "mpesa_till" | "mpesa_mobile" | "bank"
   accountName: string
-  /** Paybill / till number, or bank account number. */
+  /** Paybill / till number, M-Pesa mobile number, or bank account number. */
   number: string
-  /** Paybill account reference, or bank name and branch. */
+  /** Paybill account reference, or bank name and branch. Empty for till and mobile accounts. */
   reference: string
 }
 /** New payout details are checked by SchoolShop before the next payout uses them. */

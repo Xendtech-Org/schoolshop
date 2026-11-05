@@ -196,7 +196,7 @@ function PayoutsSection({ s }: { s: PlatformSettings }) {
   const days = Number(draft.holdDays), min = Number(draft.minimum)
   const invalid = !(Number.isInteger(days) && days >= 0 && days <= 14) ? "Hold for between 0 and 14 days." : !(Number.isFinite(min) && min >= 0 && min <= 100_000) ? "The minimum payout must be between KES 0 and KES 100,000." : null
   return (
-    <SettingsSection id="payouts" title="Payouts" description="When publishers get paid for a delivery.">
+    <SettingsSection id="payouts" title="Payouts" description="Set when payouts become eligible, and whether eligible verified M-Pesa mobile accounts are paid automatically through SasaPay.">
       <div className="grid gap-5 sm:grid-cols-2">
         <Field id="hold-days" label="Wait after delivery" hint="Gives the school time to report missing or damaged packs.">
           <Unit id="hold-days" unit="days" value={draft.holdDays} onChange={(e) => setDraft({ ...draft, holdDays: e.target.value })} />
@@ -207,11 +207,21 @@ function PayoutsSection({ s }: { s: PlatformSettings }) {
       </div>
       <label htmlFor="auto-release" className="flex cursor-pointer items-center justify-between gap-4 rounded-xl border p-4">
         <span className="flex flex-col">
-          <span className="font-medium">Release payouts automatically</span>
-          <span className="text-sm text-muted-foreground">Off: finance releases each payout. On: payouts go out once the wait is over, unless someone puts them on hold. Payouts to an account that changed recently always wait for a person.</span>
+          <span className="font-medium">Release eligible payouts automatically</span>
+          <span className="text-sm text-muted-foreground">Only verified M-Pesa mobile accounts are sent automatically. Bank, Paybill, and Till payouts stay queued for finance to send manually. Transfers are recorded as paid only after SasaPay confirms them.</span>
         </span>
         <Switch id="auto-release" checked={draft.autoRelease} onCheckedChange={(on) => setDraft({ ...draft, autoRelease: on })} />
       </label>
+      {draft.autoRelease && s.payments.fake && (
+        <p role="status" className="rounded-xl bg-warn-bg px-4 py-3 text-sm font-medium">
+          This server uses fake payments. Automatic payouts will be simulated and no money will move.
+        </p>
+      )}
+      {draft.autoRelease && !s.payments.fake && !s.payments.mpesaReady && (
+        <p role="alert" className="rounded-xl bg-warn-bg px-4 py-3 text-sm font-medium">
+          Configure and verify SasaPay in Payment providers before automatic payouts can be sent.
+        </p>
+      )}
       <Footer s={s} section="payouts" dirty={dirty} save={save} invalid={dirty ? invalid : null} onUndo={() => setDraft(base)} onSave={() => submit({ holdDays: days, minimumCents: Math.round(min * 100), autoRelease: draft.autoRelease })} />
     </SettingsSection>
   )
