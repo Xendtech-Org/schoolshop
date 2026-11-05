@@ -1,8 +1,8 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Link } from "react-router"
-import { BadgeCheck, Lock } from "lucide-react"
+import { BadgeCheck, ImagePlus, Lock, Trash2, Upload } from "lucide-react"
 import { z } from "zod"
 
 import { PageHeader } from "@/components/common/PageHeader"
@@ -14,6 +14,7 @@ import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, For
 import { Input } from "@/components/ui/input"
 import { NativeSelect } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { Textarea } from "@/components/ui/textarea"
 import * as endpoints from "@/lib/api/endpoints"
 import { usePublisherSettings, useSettingsMutation } from "@/lib/api/queries"
 import type { NotificationEvent, PublisherSettings } from "@/lib/api/schemas"
@@ -55,53 +56,118 @@ export function PublisherSettingsPage() {
 
 /* ── Company ─────────────────────────────────────────────────── */
 
-const profileSchema = z.object({
+/** Locked details aren't sent or checked: they stay as SchoolShop verified them. */
+const profileSchema = (locked: { companyName: boolean; kraPin: boolean; registrationNo: boolean }) => z.object({
+  companyName: locked.companyName ? z.string() : z.string().trim().min(2, "Enter the registered company name").max(160, "Keep it under 160 characters."),
+  kraPin: locked.kraPin ? z.string() : z.string().trim().refine((v) => !v || /^[a-z]\d{9}[a-z]$/i.test(v), "Enter a KRA PIN, like P051234567X"),
+  registrationNo: locked.registrationNo ? z.string() : z.string().trim().max(60, "Keep it under 60 characters.").refine((v) => !v || v.length >= 4, "Enter the registration number"),
+  website: z.string().trim().max(200, "Keep it under 200 characters.").refine((v) => !v || /^(https?:\/\/)?[^\s/.]+(\.[^\s/.]+)+(\/\S*)?$/i.test(v), "Enter a website, like longhorn.co.ke"),
+  about: z.string().trim().max(500, "Keep it under 500 characters."),
   contactName: z.string().trim().min(2, "Enter a contact name"),
   phone: z.string().trim().refine((v) => normaliseKenyanPhone(v) !== null, "Enter a Kenyan mobile number"),
   email: z.email("Enter an email for order notices"),
   dispatchAddress: z.string().trim().min(5, "Enter the address schools and carriers use"),
   county: z.string().min(1, "Choose a county"),
 })
-type ProfileValues = z.infer<typeof profileSchema>
+type ProfileValues = z.infer<ReturnType<typeof profileSchema>>
 
 function CompanySection({ data }: { data: PublisherSettings }) {
   const p = data.profile
+  // Verified details are locked. One that was never given can still be added.
+  const locked = {
+    companyName: p.verified && !!p.companyName,
+    kraPin: p.verified && !!p.kraPin,
+    registrationNo: p.verified && !!p.registrationNo,
+  }
   const form = useForm<ProfileValues>({
-    resolver: zodResolver(profileSchema),
-    defaultValues: { contactName: p.contactName, phone: showContact(p.phone), email: p.email, dispatchAddress: p.dispatchAddress, county: p.county },
+    resolver: zodResolver(profileSchema(locked)),
+    defaultValues: {
+      companyName: p.companyName, kraPin: p.kraPin, registrationNo: p.registrationNo, website: p.website, about: p.about,
+      contactName: p.contactName, phone: showContact(p.phone), email: p.email, dispatchAddress: p.dispatchAddress, county: p.county,
+    },
   })
   const save = useSettingsMutation(endpoints.updatePublisherProfile)
+  const anyLocked = locked.companyName || locked.kraPin || locked.registrationNo
 
   return (
     <SettingsSection id="company" title="Company profile" description="Schools see your company name. Order notices go to the contact details below.">
-      <div className="grid gap-3 rounded-xl bg-paper p-4 sm:grid-cols-2">
-        <div className="flex flex-col gap-0.5">
-          <span className="text-sm text-muted-foreground">Registered name</span>
-          <span className="flex items-center gap-2 font-semibold">
-            {p.companyName}
-            {p.verifiedAt && <Badge variant="success"><BadgeCheck aria-hidden /> Verified</Badge>}
-          </span>
+      <LogoUpload logoUrl={p.logoUrl} companyName={p.companyName} />
+      {anyLocked && (
+        <div className="grid gap-3 rounded-xl bg-paper p-4 sm:grid-cols-2">
+          {locked.companyName && (
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm text-muted-foreground">Registered name</span>
+              <span className="flex items-center gap-2 font-semibold">
+                {p.companyName}
+                <Badge variant="success"><BadgeCheck aria-hidden /> Verified</Badge>
+              </span>
+            </div>
+          )}
+          {locked.kraPin && (
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm text-muted-foreground">KRA PIN</span>
+              <span className="font-mono font-semibold">{p.kraPin}</span>
+            </div>
+          )}
+          {locked.registrationNo && (
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm text-muted-foreground">Registration number</span>
+              <span className="font-mono font-semibold">{p.registrationNo}</span>
+            </div>
+          )}
+          <p className="flex items-center gap-2 text-sm text-muted-foreground sm:col-span-2">
+            <Lock className="size-4 shrink-0" aria-hidden />
+            {p.verifiedAt ? `Verified on ${formatDayLong(p.verifiedAt.slice(0, 10))}. ` : ""}To change these, contact SchoolShop support.
+          </p>
         </div>
-        <div className="flex flex-col gap-0.5">
-          <span className="text-sm text-muted-foreground">KRA PIN</span>
-          <span className="font-mono font-semibold">{p.kraPin}</span>
-        </div>
-        <p className="flex items-center gap-2 text-sm text-muted-foreground sm:col-span-2">
-          <Lock className="size-4 shrink-0" aria-hidden />
-          {p.verifiedAt ? `Verified on ${formatDayLong(p.verifiedAt.slice(0, 10))}. ` : ""}To change these, contact SchoolShop support.
-        </p>
-      </div>
+      )}
       <Form {...form}>
         <form
           noValidate
           className="flex flex-col gap-4"
           onSubmit={form.handleSubmit((v) =>
             save.mutate(
-              { ...v, phone: normaliseKenyanPhone(v.phone)!, email: v.email.toLowerCase() },
+              {
+                website: v.website, about: v.about, contactName: v.contactName, dispatchAddress: v.dispatchAddress, county: v.county,
+                phone: normaliseKenyanPhone(v.phone)!, email: v.email.toLowerCase(),
+                ...(!locked.companyName && { companyName: v.companyName }),
+                ...(!locked.kraPin && { kraPin: v.kraPin.toUpperCase() }),
+                ...(!locked.registrationNo && { registrationNo: v.registrationNo }),
+              },
               { onSuccess: () => form.reset(v), onError: (e) => form.setError("root", { message: errorText(e) }) }
             )
           )}
         >
+          {!(locked.companyName && locked.kraPin && locked.registrationNo) && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {!locked.companyName && (
+                <FormField control={form.control} name="companyName" render={({ field }) => (
+                  <FormItem className="sm:col-span-2"><FormLabel>Registered company name</FormLabel><FormControl><Input autoComplete="organization" {...field} /></FormControl><FormMessage /></FormItem>
+                )} />
+              )}
+              {!locked.kraPin && (
+                <FormField control={form.control} name="kraPin" render={({ field }) => (
+                  <FormItem><FormLabel>KRA PIN</FormLabel><FormControl><Input placeholder="P051234567X" {...field} /></FormControl><FormMessage /></FormItem>
+                )} />
+              )}
+              {!locked.registrationNo && (
+                <FormField control={form.control} name="registrationNo" render={({ field }) => (
+                  <FormItem><FormLabel>Registration number</FormLabel><FormControl><Input placeholder="PVT-2019-0048812" {...field} /></FormControl><FormMessage /></FormItem>
+                )} />
+              )}
+            </div>
+          )}
+          <FormField control={form.control} name="website" render={({ field }) => (
+            <FormItem><FormLabel>Website</FormLabel><FormControl><Input inputMode="url" placeholder="longhorn.co.ke" {...field} /></FormControl><FormMessage /></FormItem>
+          )} />
+          <FormField control={form.control} name="about" render={({ field }) => (
+            <FormItem>
+              <FormLabel>About your company</FormLabel>
+              <FormControl><Textarea rows={3} {...field} /></FormControl>
+              <FormDescription>A few sentences, up to 500 characters.</FormDescription>
+              <FormMessage />
+            </FormItem>
+          )} />
           <div className="grid gap-4 sm:grid-cols-2">
             <FormField control={form.control} name="contactName" render={({ field }) => (
               <FormItem><FormLabel>Contact person</FormLabel><FormControl><Input autoComplete="name" {...field} /></FormControl><FormMessage /></FormItem>
@@ -137,6 +203,68 @@ function CompanySection({ data }: { data: PublisherSettings }) {
         Payout details are on the <Link to="/publisher/payouts" className="font-semibold text-accent-text hover:underline">Payouts</Link> page.
       </p>
     </SettingsSection>
+  )
+}
+
+function LogoUpload({ logoUrl, companyName }: { logoUrl: string | null; companyName: string }) {
+  const input = useRef<HTMLInputElement>(null)
+  const uploadLogo = useSettingsMutation(endpoints.uploadPublisherLogo)
+  const removeLogo = useSettingsMutation(endpoints.removePublisherLogo)
+  const [error, setError] = useState<string | null>(null)
+  const busy = uploadLogo.isPending || removeLogo.isPending
+
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-sm font-medium">Company logo</span>
+      <div className="flex items-center gap-4">
+        {logoUrl ? (
+          <img src={logoUrl} alt={`${companyName} logo`} className="size-20 shrink-0 rounded-lg border object-contain p-1" />
+        ) : (
+          <span className="flex size-20 shrink-0 items-center justify-center rounded-lg border border-dashed text-muted-foreground">
+            <ImagePlus className="size-5" aria-hidden />
+          </span>
+        )}
+        <div className="flex flex-col gap-2">
+          <p className="text-sm text-muted-foreground">JPG, PNG or WebP, up to 5 MB. It saves as soon as you upload it.</p>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => input.current?.click()}>
+              <Upload aria-hidden /> {uploadLogo.isPending ? "Uploading…" : logoUrl ? "Replace logo" : "Upload logo"}
+            </Button>
+            {logoUrl && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-destructive"
+                disabled={busy}
+                onClick={() => {
+                  setError(null)
+                  removeLogo.mutate(undefined, { onError: (e) => setError(errorText(e)) })
+                }}
+              >
+                <Trash2 aria-hidden /> Remove
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+      <input
+        ref={input}
+        type="file"
+        accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          e.target.value = ""
+          if (!file) return
+          setError(null)
+          uploadLogo.mutate(file, { onError: (err) => setError(errorText(err, "file")) })
+        }}
+      />
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    </div>
   )
 }
 

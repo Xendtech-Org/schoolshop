@@ -570,7 +570,12 @@ export const publisherSettingsSchema = z.object({
   profile: z.object({
     companyName: z.string(),
     kraPin: z.string(),
+    registrationNo: z.string(),
+    verified: z.boolean(),
     verifiedAt: isoDateTime.nullable(),
+    logoUrl: z.string().nullable(),
+    website: z.string(),
+    about: z.string(),
     contactName: z.string(),
     phone: z.string(),
     email: z.email(),
