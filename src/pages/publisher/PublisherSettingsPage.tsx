@@ -57,7 +57,7 @@ export function PublisherSettingsPage() {
 /* ── Company ─────────────────────────────────────────────────── */
 
 /** Locked details aren't sent or checked: they stay as SchoolShop verified them. */
-const profileSchema = (locked: { companyName: boolean; kraPin: boolean; registrationNo: boolean }) => z.object({
+const profileSchema = (locked: PublisherSettings["profile"]["locked"]) => z.object({
   companyName: locked.companyName ? z.string() : z.string().trim().min(2, "Enter the registered company name").max(160, "Keep it under 160 characters."),
   kraPin: locked.kraPin ? z.string() : z.string().trim().refine((v) => !v || /^[a-z]\d{9}[a-z]$/i.test(v), "Enter a KRA PIN, like P051234567X"),
   registrationNo: locked.registrationNo ? z.string() : z.string().trim().max(60, "Keep it under 60 characters.").refine((v) => !v || v.length >= 4, "Enter the registration number"),
@@ -71,14 +71,11 @@ const profileSchema = (locked: { companyName: boolean; kraPin: boolean; registra
 })
 type ProfileValues = z.infer<ReturnType<typeof profileSchema>>
 
+const uncheckedHint = "SchoolShop hasn't checked this yet. You can edit it until they do."
+
 function CompanySection({ data }: { data: PublisherSettings }) {
   const p = data.profile
-  // Verified details are locked. One that was never given can still be added.
-  const locked = {
-    companyName: p.verified && !!p.companyName,
-    kraPin: p.verified && !!p.kraPin,
-    registrationNo: p.verified && !!p.registrationNo,
-  }
+  const locked = p.locked
   const form = useForm<ProfileValues>({
     resolver: zodResolver(profileSchema(locked)),
     defaultValues: {
@@ -147,12 +144,12 @@ function CompanySection({ data }: { data: PublisherSettings }) {
               )}
               {!locked.kraPin && (
                 <FormField control={form.control} name="kraPin" render={({ field }) => (
-                  <FormItem><FormLabel>KRA PIN</FormLabel><FormControl><Input placeholder="P051234567X" {...field} /></FormControl><FormMessage /></FormItem>
+                  <FormItem><FormLabel>KRA PIN</FormLabel><FormControl><Input placeholder="P051234567X" {...field} /></FormControl>{p.verified && p.kraPin && <FormDescription>{uncheckedHint}</FormDescription>}<FormMessage /></FormItem>
                 )} />
               )}
               {!locked.registrationNo && (
                 <FormField control={form.control} name="registrationNo" render={({ field }) => (
-                  <FormItem><FormLabel>Registration number</FormLabel><FormControl><Input placeholder="PVT-2019-0048812" {...field} /></FormControl><FormMessage /></FormItem>
+                  <FormItem><FormLabel>Registration number</FormLabel><FormControl><Input placeholder="PVT-2019-0048812" {...field} /></FormControl>{p.verified && p.registrationNo && <FormDescription>{uncheckedHint}</FormDescription>}<FormMessage /></FormItem>
                 )} />
               )}
             </div>

@@ -205,6 +205,8 @@ function OrgDetail({ org, onNotice }: { org: AdminOrg; onNotice: (text: string) 
         <Fact term="KRA PIN" value={org.kraPin} />
       </dl>
 
+      {org.uncheckedDetails.map((field) => <UncheckedDetail key={field} org={org} field={field} allowed={allowed} />)}
+
       {!allowed && (
         <p className="flex gap-2 rounded-xl bg-info-bg px-4 py-3 text-sm">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
@@ -252,6 +254,24 @@ function OrgDetail({ org, onNotice }: { org: AdminOrg; onNotice: (text: string) 
         </ol>
       </section>
     </article>
+  )
+}
+
+/** A detail a verified publisher added. They can edit it until it's marked as checked here. */
+function UncheckedDetail({ org, field, allowed }: { org: AdminOrg; field: AdminOrg["uncheckedDetails"][number]; allowed: boolean }) {
+  const value = (field === "kra_pin" ? org.kraPin : org.registrationNo) ?? ""
+  const mark = useOrgMutation(() => endpoints.checkOrgDetail(org.id, field, value))
+  return (
+    <div className="flex flex-col gap-2 rounded-xl bg-info-bg px-4 py-3 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="flex min-w-0 gap-2">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+          <span>{field === "kra_pin" ? "KRA PIN" : "Company registration"} <span className="font-semibold">{value}</span> was added after verification and isn't checked yet.</span>
+        </p>
+        {allowed && <Button size="sm" onClick={() => mark.mutate()} disabled={mark.isPending}><CheckCircle2 aria-hidden /> Mark as checked</Button>}
+      </div>
+      {mark.error && <p role="alert" className="text-destructive">{errorText(mark.error)}</p>}
+    </div>
   )
 }
 

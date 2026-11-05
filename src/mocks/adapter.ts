@@ -1375,6 +1375,11 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     return { sent: true }
   }],
   ["get", "/admin/organisations/:id/", ({ params }) => adminOrgs.get(params.id) ?? raise(notFound())],
+  ["post", "/admin/organisations/:id/details/:field/", ({ params }) => {
+    const org = adminOrgs.get(params.id) ?? raise(notFound())
+    org.uncheckedDetails = org.uncheckedDetails.filter((f) => f !== params.field)
+    return org
+  }],
   ["post", "/admin/organisations/:id/checks/:checkId/", ({ params, body, userId }) => {
     const org = adminOrgs.get(params.id) ?? raise(notFound())
     const check = org.checks.find((c) => c.id === params.checkId) ?? raise(notFound())

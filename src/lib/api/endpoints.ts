@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { api } from "@/lib/api/client"
-import type { PaymentsInput, PlatformSettings, PublisherSettings, SchoolSettings, SettingsSection } from "@/lib/api/schemas"
+import type { AdminOrg, PaymentsInput, PlatformSettings, PublisherSettings, SchoolSettings, SettingsSection } from "@/lib/api/schemas"
 import {
   accountSchema,
   adminMoneySchema,
@@ -329,7 +329,7 @@ export const updatePayoutAccount = async (input: PayoutAccountInput) => {
 }
 
 export const getPublisherSettings = () => get("/publisher/settings/", publisherSettingsSchema)
-/** Once verified, the API keeps the company name, KRA PIN and registration number it already has. */
+/** The API keeps any of the company name, KRA PIN and registration number that are locked. */
 export type ProfileInput = Pick<PublisherSettings["profile"], "website" | "about" | "contactName" | "phone" | "email" | "dispatchAddress" | "county"> &
   Partial<Pick<PublisherSettings["profile"], "companyName" | "kraPin" | "registrationNo">>
 export const updatePublisherProfile = async (input: ProfileInput) => {
@@ -392,6 +392,9 @@ export const refundOrderItems = (id: string, itemIds: string[], reason: string) 
 export const resolveOrderIssue = (id: string, note: string) => post(`/admin/orders/${id}/resolve/`, adminOrderSchema, { note })
 export const listAdminOrgs = () => get("/admin/organisations/", z.array(adminOrgSummarySchema))
 export const getAdminOrg = (id: string) => get(`/admin/organisations/${id}/`, adminOrgSchema)
+/** Locks a detail a verified publisher added. value is what staff saw: refused if it has changed since. */
+export const checkOrgDetail = (id: string, field: AdminOrg["uncheckedDetails"][number], value: string) =>
+  post(`/admin/organisations/${id}/details/${field}/`, adminOrgSchema, { value })
 export type OrgDecision = "approve" | "request-info" | "reject" | "suspend" | "reactivate"
 /** Every decision is logged and the organisation's contact gets the note by SMS and email. */
 export const decideOrg = (id: string, decision: OrgDecision, note: string) =>

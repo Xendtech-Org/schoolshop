@@ -572,6 +572,8 @@ export const publisherSettingsSchema = z.object({
     kraPin: z.string(),
     registrationNo: z.string(),
     verified: z.boolean(),
+    /** Locked details keep what SchoolShop checked. The rest are the publisher's to edit. */
+    locked: z.object({ companyName: z.boolean(), kraPin: z.boolean(), registrationNo: z.boolean() }),
     verifiedAt: isoDateTime.nullable(),
     logoUrl: z.string().nullable(),
     website: z.string(),
@@ -938,6 +940,8 @@ export const adminOrgSchema = adminOrgSummarySchema.extend({
   kraPin: z.string().nullable(),
   verifiedAt: isoDateTime.nullable(),
   suspendedReason: z.string().nullable(),
+  /** Added by a verified publisher and not checked by SchoolShop yet. */
+  uncheckedDetails: z.array(z.enum(["kra_pin", "registration_no"])),
   checks: z.array(orgCheckSchema),
   /** Live organisations: this term at a glance. */
   stats: z.array(z.object({ label: z.string(), value: z.string() })),
