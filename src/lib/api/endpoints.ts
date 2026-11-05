@@ -19,6 +19,7 @@ import {
   authTokensSchema,
   booklistSchema,
   catalogDeleteResultSchema,
+  adminProductSchema,
   catalogPublishResultSchema,
   catalogImportResultSchema,
   catalogItemSchema,
@@ -349,6 +350,9 @@ export async function savePlatformSettings<K extends SettingsSection>(section: K
   const { data } = await api.put(`/admin/settings/${section}/`, value)
   return platformSettingsSchema.parse(data)
 }
+export const listAdminProducts = (search: string) => get("/admin/products/", z.array(adminProductSchema), { search })
+export const takeDownProduct = (id: string, reason: string) => post(`/admin/products/${id}/take-down/`, adminProductSchema, { reason })
+export const restoreProduct = (id: string) => post(`/admin/products/${id}/restore/`, adminProductSchema)
 export const listAudit = () => get("/admin/audit/", z.array(auditEntrySchema))
 export const getAdminRefunds = () => get("/admin/refunds/", adminRefundsSchema)
 /** Pays back each order's requested items to the M-Pesa number that paid. */

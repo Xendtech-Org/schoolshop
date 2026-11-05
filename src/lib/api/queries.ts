@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import * as endpoints from "@/lib/api/endpoints"
 import type { Account, AdminMoney, AdminRefunds, SettingsSection, AdminOrder, AdminOrg, CollectionRow, PublisherSettings, SchoolSettings, StaffDirectory } from "@/lib/api/schemas"
@@ -410,6 +410,18 @@ export const useCatalogUploads = () => {
 export const useDeleteCatalogItems = () => {
   const qc = useQueryClient()
   return useMutation({ mutationFn: endpoints.deleteCatalogItems, onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.catalog }) })
+}
+
+export const useAdminProducts = (search: string) =>
+  useQuery({ queryKey: ["admin-products", search], queryFn: () => endpoints.listAdminProducts(search), placeholderData: keepPreviousData })
+
+/** Taking a product down or restoring it changes the list and writes to the audit log. */
+export function useAdminProductAction<V>(fn: (vars: V) => Promise<unknown>) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => Promise.all([qc.invalidateQueries({ queryKey: ["admin-products"] }), qc.invalidateQueries({ queryKey: queryKeys.audit })]),
+  })
 }
 
 export const usePublishCatalogItems = () => {

@@ -225,8 +225,13 @@ function syncSchoolRow(o: Order) {
 const refundLog: RefundRecord[] = db.refundLogSeed.map((r) => ({ ...r }))
 const actorName = (userId: string | null) => usersById().find((u) => u.id === userId)?.name ?? "SchoolShop"
 
+const adminProduct = (c: CatalogItem) => ({
+  id: c.id, title: c.title, publisherName: "Longhorn Publishers", gradeLabel: c.gradeLabel, isbn: c.isbn, priceCents: c.priceCents, coverUrl: c.coverUrl, status: c.status, takenDown: c.takenDown ?? null,
+})
+
 /** The automatic checks on publishing: one that fails stops it. */
-function publishProblem(item: Pick<CatalogItem, "isbn" | "id">): string | null {
+function publishProblem(item: Pick<CatalogItem, "isbn" | "id" | "takenDown">): string | null {
+  if (item.takenDown) return `SchoolShop took this product down: ${item.takenDown.reason} Contact SchoolShop support to have it restored.`
   if (!item.isbn) return null
   if (!isbnValid(item.isbn)) return `Can't publish this yet. ${item.isbn} isn't a valid ISBN-13. The last digit doesn't match.`
   const clash = [...catalog.values()].find((c) => c.id !== item.id && c.isbn === item.isbn)
@@ -625,6 +630,7 @@ const guards: Array<[method: string, path: RegExp, orgType: OrgType, permission:
   ["post", /^\/admin\/orders\/[^/]+\/(refund|resolve)\/$/, "platform", "refunds.approve"],
   ["get", /^\/admin\/(money|collections|refunds)\//, "platform", "money.view"],
   ["get", /^\/admin\/audit\//, "platform", "audit.view"],
+  ["*", /^\/admin\/products\//, "platform", "catalog.takedown"],
   ["*", /^\/admin\/settings\//, "platform", "settings.fees"],
   ["post", /^\/admin\/(refunds|disputes)\//, "platform", "refunds.approve"],
   ["post", /^\/admin\/(payouts|payout-accounts)\//, "platform", "payouts.release"],
@@ -1185,6 +1191,30 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     }
     return settingsView()
   }],
+  ["get", "/admin/products/", ({ query }) => {
+    const q = (query.search ?? "").trim().toLowerCase()
+    return [...catalog.values()]
+      .filter((c) => c.status === "live" || c.takenDown)
+      .filter((c) => !q || c.title.toLowerCase().includes(q) || (c.isbn ?? "").includes(q))
+      .sort((a, b) => Number(!!b.takenDown) - Number(!!a.takenDown) || a.title.localeCompare(b.title))
+      .map(adminProduct)
+  }],
+  ["post", "/admin/products/:id/take-down/", ({ params, body, userId }) => {
+    const item = catalog.get(params.id) ?? raise(notFound())
+    if (item.takenDown) throw new HttpError(400, { detail: "This product has already been taken down." })
+    const reason = String(body.reason ?? "").trim()
+    if (!reason) throw new HttpError(400, { reason: ["Give the reason. The publisher sees it."] })
+    Object.assign(item, { status: "draft", takenDown: { at: stamp(), reason } })
+    audit(userId, "catalog", `took down Longhorn Publishers's ${item.title}: "${reason}"`, { label: item.title, href: `/admin/products?search=${encodeURIComponent(item.title)}` })
+    return adminProduct(item)
+  }],
+  ["post", "/admin/products/:id/restore/", ({ params, userId }) => {
+    const item = catalog.get(params.id) ?? raise(notFound())
+    if (!item.takenDown) throw new HttpError(400, { detail: "This product isn't taken down." })
+    item.takenDown = null
+    audit(userId, "catalog", `restored Longhorn Publishers's ${item.title}`, { label: item.title, href: `/admin/products?search=${encodeURIComponent(item.title)}` })
+    return adminProduct(item)
+  }],
   ["get", "/admin/audit/", () => auditLog],
   ["get", "/admin/refunds/", () => refundsView()],
   ["post", "/admin/refunds/approve/", ({ body, userId }) => {
@@ -1667,7 +1697,7 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     const isbn = "isbn" in body ? (body.isbn ? String(body.isbn) : null) : item.isbn
     if (isbn && [...catalog.values()].some((c) => c.isbn === isbn && c.id !== item.id)) throw new HttpError(400, { isbn: ["Another title already uses this ISBN."] })
     if (body.status === "live") {
-      const problem = publishProblem({ id: item.id, isbn })
+      const problem = publishProblem({ id: item.id, isbn, takenDown: item.takenDown })
       if (problem) throw new HttpError(400, { detail: problem })
     }
     Object.assign(item, body, { isbn })

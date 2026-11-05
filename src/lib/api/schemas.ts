@@ -299,6 +299,22 @@ export type ProductDetail = z.infer<typeof productDetailSchema>
 
 export const gradeBandSchema = z.enum(["pp", "1-3", "4-6", "7-9", "all"])
 
+const takenDownSchema = z.object({ at: isoDateTime, reason: z.string() })
+
+/** A product as SchoolShop staff see it, to take it out of the shop or restore it. */
+export const adminProductSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  publisherName: z.string(),
+  gradeLabel: z.string(),
+  isbn: z.string().nullable(),
+  priceCents: cents,
+  coverUrl: z.url().nullable(),
+  status: z.enum(["live", "draft"]),
+  takenDown: takenDownSchema.nullable(),
+})
+export type AdminProduct = z.infer<typeof adminProductSchema>
+
 /** A title in a publisher's own catalog, with stock. Parents see it as a Product. */
 export const catalogItemSchema = z.object({
   id: z.string(),
@@ -317,6 +333,8 @@ export const catalogItemSchema = z.object({
   /** The uploaded cover, or null to show a coloured placeholder. */
   coverUrl: z.url().nullable().default(null),
   files: z.array(catalogFileSchema).default([]),
+  /** SchoolShop took it out of the shop. The publisher can't publish it until SchoolShop restores it. */
+  takenDown: takenDownSchema.nullish(),
 })
 export type CatalogItem = z.infer<typeof catalogItemSchema>
 

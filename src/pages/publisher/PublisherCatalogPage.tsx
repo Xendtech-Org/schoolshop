@@ -40,8 +40,8 @@ const stateBadge: Record<StockState, { label: string; variant: "success" | "warn
   draft: { label: "Draft", variant: "secondary" },
 }
 
-function ItemBadge({ st }: { st: StockState }) {
-  const b = stateBadge[st]
+function ItemBadge({ item, st }: { item: CatalogItem; st: StockState }) {
+  const b = item.takenDown ? { label: "Taken down", variant: "destructive" as const } : stateBadge[st]
   return <Badge variant={b.variant}>{b.label}</Badge>
 }
 
@@ -264,6 +264,7 @@ function Catalog({ items }: { items: CatalogItem[] }) {
                             <span className="flex min-w-0 flex-col">
                               <span className="font-semibold">{item.title}</span>
                               <span className="text-[13px] text-muted-foreground">{item.format}</span>
+                              {item.takenDown && <span className="text-[13px] text-destructive">SchoolShop: {item.takenDown.reason}</span>}
                             </span>
                           </div>
                         </TableCell>
@@ -274,7 +275,7 @@ function Catalog({ items }: { items: CatalogItem[] }) {
                           {item.stock.toLocaleString("en-KE")}
                         </TableCell>
                         <TableCell className="text-right">{item.schoolListCount}</TableCell>
-                        <TableCell><ItemBadge st={st} /></TableCell>
+                        <TableCell><ItemBadge item={item} st={st} /></TableCell>
                         <TableCell className="text-right">
                           <Button variant="ghost" size="sm" onClick={() => setEditing(item)} aria-label={`Edit ${item.title}`}>
                             <Pencil aria-hidden /> Edit
@@ -302,8 +303,9 @@ function Catalog({ items }: { items: CatalogItem[] }) {
                       <span className="flex min-w-0 grow flex-col">
                         <span className="font-semibold">{item.title}</span>
                         <span className="text-[13px] text-muted-foreground">{item.gradeLabel} · {item.format}</span>
+                        {item.takenDown && <span className="text-[13px] text-destructive">SchoolShop: {item.takenDown.reason}</span>}
                       </span>
-                      <ItemBadge st={st} />
+                      <ItemBadge item={item} st={st} />
                     </div>
                     <dl className="grid grid-cols-3 gap-2 text-sm">
                       <div><dt className="text-muted-foreground">Price</dt><dd className="font-semibold">{formatKes(item.priceCents)}</dd></div>
