@@ -225,6 +225,14 @@ function syncSchoolRow(o: Order) {
 const refundLog: RefundRecord[] = db.refundLogSeed.map((r) => ({ ...r }))
 const actorName = (userId: string | null) => usersById().find((u) => u.id === userId)?.name ?? "SchoolShop"
 
+/** The parent's own order: which lines they can still ask to have refunded (the limit in Fees & settings → Refunds). */
+function parentOrder(o: Order): Order {
+  const late = platform.refunds.parentRequestsUntil === "dispatched" ? ["dispatched", "received"] : ["received"]
+  const open = !o.refundWaiting && !!o.paidAt && !o.collectedAt
+  const stopped = new Set(o.shipments.filter((s) => late.includes(s.status)).map((s) => s.publisherName))
+  return { ...o, refundableItemIds: open ? o.items.filter((i) => i.status === "active" && !stopped.has(i.publisherName)).map((i) => i.id) : [] }
+}
+
 /** Pay back items on an order to the number that paid, and close whatever asked for it. */
 function refundItems(o: Order, itemIds: string[], reason: string, userId: string | null) {
   const x = orderExtra(o)
@@ -994,7 +1002,19 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     orders.set(id, order)
     return order
   }],
-  ["get", "/orders/:id/", ({ params }) => orders.get(params.id) ?? raise(notFound())],
+  ["get", "/orders/:id/", ({ params }) => parentOrder(orders.get(params.id) ?? raise(notFound()))],
+  ["post", "/orders/:id/refund-request/", ({ params, body }) => {
+    const order = parentOrder(orders.get(params.id) ?? raise(notFound()))
+    const itemIds = (body.itemIds as string[] | undefined) ?? []
+    if (!itemIds.length) throw new HttpError(400, { itemIds: ["Choose what you'd like refunded."] })
+    const reason = String(body.reason ?? "").trim()
+    if (!reason) throw new HttpError(400, { reason: ["Tell us why you'd like a refund."] })
+    if (!itemIds.every((id) => order.refundableItemIds?.includes(id))) throw new HttpError(409, { detail: "It's too late to ask for a refund on that, or you've already asked. Contact SchoolShop support." })
+    const x = orderExtra(order)
+    Object.assign(x, { issue: "refund_due", issueDetail: `The parent asked for money back: ${reason}`, refundRequest: { from: "parent", reason, itemIds, requestedAt: stamp() } })
+    orders.set(order.id, Object.assign(orders.get(order.id)!, { refundWaiting: true }))
+    return parentOrder(orders.get(order.id)!)
+  }],
   ["post", "/orders/:id/payments/", ({ params, body }) => {
     const order = orders.get(params.id) ?? raise(notFound())
     if (order.status !== "pending_payment" && order.status !== "payment_failed") throw new HttpError(409, { detail: "This order is already paid." })

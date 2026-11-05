@@ -209,6 +209,8 @@ export const orderSchema = z.object({
       qty: z.number().int().positive(),
       unitPriceCents: cents,
       status: z.enum(["active", "unavailable", "refunded"]),
+      /** Downloads that come with the title, once it's paid for. Only on the parent's own order. */
+      resources: z.array(z.object({ id: z.string(), label: z.string(), name: z.string(), sizeBytes: z.number().int().nonnegative() })).optional(),
     })
   ),
   shipments: z.array(
@@ -218,6 +220,10 @@ export const orderSchema = z.object({
       status: shipmentStatusSchema,
     })
   ),
+  /** Lines the parent can still ask to have refunded. Only on the parent's own order. */
+  refundableItemIds: z.array(z.string()).optional(),
+  /** A refund on this order is waiting for SchoolShop. */
+  refundWaiting: z.boolean().optional(),
 })
 export type Order = z.infer<typeof orderSchema>
 
@@ -499,6 +505,8 @@ export const adminPayoutSchema = payoutSchema.extend({
   account: payoutAccountSchema,
   packs: z.number().int(),
   holdReason: z.string().nullable(),
+  /** Ready, but the publisher's total is under the smallest payout, so it waits for their next delivery. */
+  belowMinimum: z.boolean().optional(),
   events: z.array(z.object({ id: z.string(), at: isoDateTime, actor: z.string(), text: z.string() })),
 })
 export type AdminPayout = z.infer<typeof adminPayoutSchema>
@@ -578,7 +586,8 @@ export const schoolSettingsSchema = z.object({
     verifiedAt: isoDateTime.nullable(),
     contactName: z.string(),
     phone: z.string(),
-    email: z.email(),
+    /** Empty until the school fills it in: not every school gave one when it joined. */
+    email: z.email().or(z.literal("")),
     county: z.string(),
     deliveryAddress: z.string(),
     deliveryHours: z.string(),

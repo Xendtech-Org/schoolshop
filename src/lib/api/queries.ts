@@ -115,6 +115,14 @@ export const useStartPayment = () =>
       endpoints.startPayment(orderId, method === "card" ? { method: "card" } : { method: "mpesa", phone: phone ?? "" }),
   })
 
+export const useRequestRefund = (orderId: string) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { itemIds: string[]; reason: string }) => endpoints.requestRefund(orderId, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.order(orderId) }),
+  })
+}
+
 export const usePaymentOptions = () =>
   useQuery({ queryKey: ["payment-options"], queryFn: endpoints.getPaymentOptions, staleTime: 60_000 })
 

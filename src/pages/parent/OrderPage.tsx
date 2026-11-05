@@ -1,4 +1,7 @@
+import { useState } from "react"
 import { Link, useNavigate, useParams } from "react-router"
+
+import { FileList } from "@/components/catalog/FileList"
 
 import { SectionLabel } from "@/components/common/SectionLabel"
 import { ShipmentStatusBadge } from "@/components/common/StatusBadge"
@@ -6,9 +9,12 @@ import { QueryBoundary } from "@/components/common/QueryBoundary"
 import { ParentPageHeader } from "@/components/layout/ParentLayout"
 import { Button } from "@/components/ui/button"
 import { PayOptions } from "@/components/common/PayOptions"
-import { useOrder, useStartPayment } from "@/lib/api/queries"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Textarea } from "@/components/ui/textarea"
+import { useOrder, useRequestRefund, useStartPayment } from "@/lib/api/queries"
 import type { Order, OrderStatus } from "@/lib/api/schemas"
 import { formatDay, formatKes } from "@/lib/format"
+import { errorText } from "@/lib/settings"
 import { cn } from "@/lib/utils"
 import { useAuthStore } from "@/stores/auth"
 
@@ -48,6 +54,52 @@ function PayOrder({ order }: { order: Order }) {
       />
       <Button asChild variant="link" className="self-start"><Link to="/parent">Back to home</Link></Button>
     </div>
+  )
+}
+
+/** Asking for money back on lines that haven't gone too far along. SchoolShop decides and the parent gets an SMS. */
+function RefundRequest({ order }: { order: Order }) {
+  const [open, setOpen] = useState(false)
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [reason, setReason] = useState("")
+  const ask = useRequestRefund(order.id)
+  const lines = order.items.filter((i) => order.refundableItemIds?.includes(i.id))
+  if (ask.isSuccess || order.refundWaiting) {
+    return <p role="status" className="rounded-2xl bg-info-bg p-4 text-sm text-info-fg">We've got your refund request. SchoolShop will text you once it's decided.</p>
+  }
+  if (!lines.length) return null
+  if (!open) return <Button variant="outline" className="self-start" onClick={() => setOpen(true)}>Ask for a refund</Button>
+  const total = lines.filter((i) => picked.has(i.id)).reduce((t, i) => t + i.unitPriceCents * i.qty, 0)
+  return (
+    <section aria-label="Ask for a refund" className="flex flex-col gap-3 rounded-2xl border bg-card p-4.5">
+      <SectionLabel>Ask for a refund</SectionLabel>
+      <ul className="flex flex-col gap-2">
+        {lines.map((i) => (
+          <li key={i.id}>
+            <label className="flex cursor-pointer items-start gap-3 text-[15px]">
+              <Checkbox
+                className="mt-0.5"
+                checked={picked.has(i.id)}
+                onCheckedChange={(on) => setPicked((s) => { const n = new Set(s); if (on) n.add(i.id); else n.delete(i.id); return n })}
+              />
+              <span className="grow">{i.title}{i.qty > 1 ? ` × ${i.qty}` : ""}</span>
+              <span className="text-muted-foreground">{formatKes(i.unitPriceCents * i.qty)}</span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      <label className="flex flex-col gap-1.5 text-sm font-medium">
+        Why would you like a refund?
+        <Textarea maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </label>
+      {ask.error && <p role="alert" className="text-sm font-medium text-destructive">{errorText(ask.error)}</p>}
+      <div className="flex flex-wrap gap-3">
+        <Button disabled={!picked.size || !reason.trim() || ask.isPending} onClick={() => ask.mutate({ itemIds: [...picked], reason: reason.trim() })}>
+          {ask.isPending ? "Sending…" : total ? `Ask for ${formatKes(total)} back` : "Ask for a refund"}
+        </Button>
+        <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+      </div>
+    </section>
   )
 }
 
@@ -108,6 +160,13 @@ export function OrderPage() {
                     <ShipmentStatusBadge status={s.status} />
                   </div>
                 ))}
+                {o.items.some((i) => i.resources?.length) && (
+                  <>
+                    <SectionLabel className="mt-2">Downloads</SectionLabel>
+                    <FileList files={o.items.flatMap((i) => i.resources ?? [])} />
+                  </>
+                )}
+                <RefundRequest order={o} />
               </section>
             </div>
           )}
