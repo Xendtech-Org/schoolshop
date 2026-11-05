@@ -1,6 +1,6 @@
 import { AxiosError, type AxiosAdapter, type AxiosResponse, type InternalAxiosRequestConfig } from "axios"
 
-import type { PaymentsInput } from "@/lib/api/schemas"
+import type { EmailInput, PaymentsInput } from "@/lib/api/schemas"
 import type { AdminOrder, AdminOrg, AdminPayout, AdminRefunds, AuditCategory, AuditEntry, CatalogFile, CatalogSubmission, PlatformSettings, Collection, Dispute, RefundRecord, Booklist, CatalogItem, CollectionRow, Order, Payment, PublisherPayouts, SchoolOrderDetail, StudentOrderRow } from "@/lib/api/schemas"
 import { ownerRole, permissionsFor, roleDef, type OrgType } from "@/lib/access"
 import { formatKes, normaliseKenyanPhone } from "@/lib/format"
@@ -595,6 +595,28 @@ function applySettings(section: string, body: Record<string, unknown>): string[]
         paystack: { ...p.paystack, secretKey: hint(next.paystack.secretKey, p.paystack.secretKey) },
         mpesaReady: next.sasapay.enabled,
         cardReady: next.cardProvider !== "none",
+      }
+      break
+    }
+    case "email": {
+      const next = body as EmailInput
+      if (next.provider !== "django" && next.provider !== "resend") bad("provider", "Choose Django email or Resend.")
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next.fromEmail)) bad("fromEmail", "Enter a valid sender email address.")
+      if (!next.fromName.trim() || next.fromName.length > 120) bad("fromName", "Enter a sender name of 1 to 120 characters.")
+      if (next.resendApiKey && !next.resendApiKey.startsWith("re_")) bad("resendApiKey", "Resend API keys start with re_.")
+      const saved = platform.email
+      const resendApiKey = next.resendApiKey ? `••••${next.resendApiKey.slice(-4)}` : saved.resendApiKey
+      if (saved.provider !== next.provider) was("the email provider", saved.provider === "resend" ? "Resend" : "Django email", next.provider === "resend" ? "Resend" : "Django email")
+      was("the Resend sender email", saved.fromEmail, next.fromEmail)
+      was("the Resend sender name", saved.fromName, next.fromName)
+      if (next.resendApiKey) changes.push("changed Resend's API key")
+      if (next.provider === "resend" && !resendApiKey) bad("resendApiKey", "Enter a Resend API key before switching email to Resend.")
+      platform.email = {
+        provider: next.provider,
+        resendReady: !!resendApiKey,
+        resendApiKey,
+        fromEmail: next.fromEmail,
+        fromName: next.fromName,
       }
       break
     }

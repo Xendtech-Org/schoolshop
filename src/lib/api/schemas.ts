@@ -866,17 +866,31 @@ export const platformSettingsSchema = z.object({
     stripe: z.object({ secretKey: z.string().nullable(), webhookSecret: z.string().nullable(), webhookUrl: z.string() }),
     paystack: z.object({ secretKey: z.string().nullable(), webhookUrl: z.string() }),
   }),
+  email: z.object({
+    provider: z.enum(["django", "resend"]),
+    resendReady: z.boolean(),
+    resendApiKey: z.string().nullable(),
+    fromEmail: z.string(),
+    fromName: z.string(),
+  }),
   publishers: z.array(z.object({ id: z.string(), name: z.string() })),
   updated: z.record(z.string(), z.object({ at: isoDateTime, by: z.string() })),
 })
 export type PlatformSettings = z.infer<typeof platformSettingsSchema>
-export type SettingsSection = "commission" | "payouts" | "refunds" | "mpesa" | "terms" | "support" | "payments"
+export type SettingsSection = "commission" | "payouts" | "refunds" | "mpesa" | "terms" | "support" | "payments" | "email"
 /** What the admin sends to save the providers. Empty key fields keep the saved key. */
 export type PaymentsInput = {
   sasapay: { enabled: boolean; mode: "sandbox" | "live"; merchantCode: string; clientId: string; clientSecret: string }
   cardProvider: "none" | "stripe" | "paystack"
   stripe: { secretKey: string; webhookSecret: string }
   paystack: { secretKey: string }
+}
+/** Empty Resend key keeps the saved key. */
+export type EmailInput = {
+  provider: "django" | "resend"
+  resendApiKey: string
+  fromEmail: string
+  fromName: string
 }
 
 /** A publisher's term at a glance. */

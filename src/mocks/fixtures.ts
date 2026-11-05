@@ -854,6 +854,7 @@ export const platformSettings: Omit<PlatformSettings, "publishers" | "updated"> 
     stripe: { secretKey: "••••9f8e", webhookSecret: "••••7d6c", webhookUrl: "https://api.schoolshop.co.ke/api/payments/stripe/webhook/" },
     paystack: { secretKey: null, webhookUrl: "https://api.schoolshop.co.ke/api/payments/paystack/webhook/" },
   },
+  email: { provider: "django", resendReady: false, resendApiKey: null, fromEmail: "no-reply@schoolshop.co.ke", fromName: "SchoolShop" },
 }
 
 /** Deliveries a school has disputed. The adapter links each to the affected parents' orders and the publisher's payout. */

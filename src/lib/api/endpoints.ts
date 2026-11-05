@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { api } from "@/lib/api/client"
-import type { PaymentsInput, PlatformSettings, PublisherSettings, SchoolSettings, SettingsSection } from "@/lib/api/schemas"
+import type { EmailInput, PaymentsInput, PlatformSettings, PublisherSettings, SchoolSettings, SettingsSection } from "@/lib/api/schemas"
 import {
   accountSchema,
   adminMoneySchema,
@@ -343,7 +343,7 @@ export const changePassword = (input: { currentPassword: string; newPassword: st
 export const getAdminOverview = () => get("/admin/overview/", adminOverviewSchema)
 export const getPlatformSettings = () => get("/admin/settings/", platformSettingsSchema)
 /** Saves one section. Every change is written to the audit log. */
-export async function savePlatformSettings<K extends SettingsSection>(section: K, value: K extends "payments" ? PaymentsInput : PlatformSettings[K]) {
+export async function savePlatformSettings<K extends SettingsSection>(section: K, value: K extends "payments" ? PaymentsInput : K extends "email" ? EmailInput : PlatformSettings[K]) {
   const { data } = await api.put(`/admin/settings/${section}/`, value)
   return platformSettingsSchema.parse(data)
 }

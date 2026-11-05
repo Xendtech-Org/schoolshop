@@ -11,7 +11,7 @@ import { NativeSelect } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { ApiError } from "@/lib/api/client"
 import { useAdminMoney, usePlatformSettings, useSavePlatformSettings } from "@/lib/api/queries"
-import type { PaymentsInput, PlatformSettings, SettingsSection as Section } from "@/lib/api/schemas"
+import type { EmailInput, PaymentsInput, PlatformSettings, SettingsSection as Section } from "@/lib/api/schemas"
 import { formatKes } from "@/lib/format"
 import { errorText } from "@/lib/settings"
 import { cn } from "@/lib/utils"
@@ -28,6 +28,7 @@ const sections = [
   { id: "refunds", label: "Refunds" },
   { id: "mpesa", label: "M-Pesa" },
   { id: "payments", label: "Payment providers" },
+  { id: "email", label: "Email delivery" },
   { id: "terms", label: "Term calendar" },
   { id: "support", label: "Parent support" },
 ]
@@ -52,6 +53,7 @@ export function AdminSettingsPage() {
             <RefundsSection s={s} />
             <MpesaSection s={s} />
             <PaymentsSection s={s} />
+            <EmailSection s={s} />
             <TermsSection s={s} />
             <SupportSection s={s} />
           </div>
@@ -372,6 +374,60 @@ function PaymentsSection({ s }: { s: PlatformSettings }) {
         Now: M-Pesa {p.mpesaReady ? "on" : "off"} · cards {p.cardReady ? `on (${p.cardProvider === "paystack" ? "Paystack" : "Stripe"})` : "off"}.
       </p>
       <Footer s={s} section="payments" dirty={dirty} save={save} invalid={dirty ? invalid : null} onUndo={() => setDraft(base)} onSave={() => submit(draft)} />
+    </SettingsSection>
+  )
+}
+
+/* ── Email delivery ── */
+
+function EmailSection({ s }: { s: PlatformSettings }) {
+  const base = useStable<EmailInput>({
+    provider: s.email.provider,
+    resendApiKey: "",
+    fromEmail: s.email.fromEmail,
+    fromName: s.email.fromName,
+  })
+  const { draft, setDraft, save, dirty, submit } = useSection("email", base)
+  const errors = save.error instanceof ApiError ? save.error.fieldErrors : {}
+  const invalid =
+    draft.provider === "resend" && !s.email.resendReady && !draft.resendApiKey
+      ? "Enter the Resend API key before switching email to Resend."
+      : draft.resendApiKey && !draft.resendApiKey.startsWith("re_")
+        ? "Resend API keys start with re_."
+        : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.fromEmail)
+          ? "Enter a valid sender email address."
+          : !draft.fromName.trim() || draft.fromName.length > 120
+            ? "Enter a sender name of 1 to 120 characters."
+            : null
+  const update = (patch: Partial<EmailInput>) => setDraft({ ...draft, ...patch })
+
+  return (
+    <SettingsSection id="email" title="Email delivery" description="Choose how SchoolShop sends account, order, invitation, and payout emails. Resend credentials are encrypted and never shown again; the API key is checked when mail is sent.">
+      <RadioGroup value={draft.provider} onValueChange={(v) => update({ provider: v as EmailInput["provider"] })} className="grid gap-2 sm:grid-cols-2">
+        {([
+          ["django", "Use server email", "Use the email backend configured on the server."],
+          ["resend", "Use Resend", "Send transactional email using Resend's API."],
+        ] as const).map(([id, label, hint]) => (
+          <label key={id} htmlFor={`email-${id}`} className="flex cursor-pointer items-start gap-3 rounded-xl border p-4 has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-teal-light/40">
+            <RadioGroupItem id={`email-${id}`} value={id} className="mt-0.5" />
+            <span className="flex flex-col"><span className="font-medium">{label}</span><span className="text-sm text-muted-foreground">{hint}</span></span>
+          </label>
+        ))}
+      </RadioGroup>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <KeyField id="resend-api-key" label="Resend API key" saved={s.email.resendApiKey} value={draft.resendApiKey} onChange={(v) => update({ resendApiKey: v })} placeholder="re_…" />
+        <span />
+        <Field id="resend-from-name" label="Sender name" hint={errors.fromName?.[0]}>
+          <Input id="resend-from-name" value={draft.fromName} onChange={(e) => update({ fromName: e.target.value })} aria-invalid={!!errors.fromName} />
+        </Field>
+        <Field id="resend-from-email" label="Sender email" hint={errors.fromEmail?.[0] ?? "This address must use a domain verified in your Resend account."}>
+          <Input id="resend-from-email" type="email" autoComplete="email" value={draft.fromEmail} onChange={(e) => update({ fromEmail: e.target.value.trim() })} aria-invalid={!!errors.fromEmail} />
+        </Field>
+      </div>
+      {draft.provider === "resend" && !s.email.resendReady && !draft.resendApiKey && (
+        <p role="status" className="rounded-xl bg-warn-bg px-4 py-3 text-sm font-medium">Resend is not configured yet. Add the API key and a verified sender address to activate email delivery.</p>
+      )}
+      <Footer s={s} section="email" dirty={dirty} save={save} invalid={dirty ? invalid : null} onUndo={() => setDraft(base)} onSave={() => submit(draft)} />
     </SettingsSection>
   )
 }
