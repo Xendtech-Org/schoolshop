@@ -46,7 +46,7 @@ const day = (iso: string) => new Date(iso).toLocaleDateString("en-KE", { day: "n
 const when = (iso: string) => new Date(iso).toLocaleString("en-KE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false })
 const sum = (ps: AdminPayout[], key: "netCents" | "grossCents" | "commissionCents" = "netCents") => ps.reduce((t, p) => t + p[key], 0)
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`
-const releasable = (p: AdminPayout) => p.status === "queued" && p.account.status === "verified"
+const releasable = (p: AdminPayout) => p.status === "queued" && p.account.status === "verified" && !p.belowMinimum
 
 export function AdminMoneyPage() {
   const [params, setParams] = useSearchParams()
@@ -189,6 +189,7 @@ function Payouts({ money }: { money: AdminMoney }) {
                       <span className="flex flex-col">
                         <span>{p.schoolName}</span>
                         <span className="text-[13px] text-muted-foreground">{p.deliveryNoteNo} · {p.packs} packs{p.receivedAt ? ` · received ${day(p.receivedAt)}` : ""}</span>
+                        {p.belowMinimum && <span className="text-[13px] text-warn-fg">Under the smallest payout: waits for their next delivery</span>}
                       </span>
                     </TableCell>
                     <TableCell className="text-right">{formatKes(p.grossCents)}</TableCell>

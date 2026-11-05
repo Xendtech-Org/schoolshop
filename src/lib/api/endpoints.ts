@@ -166,6 +166,9 @@ export const createOrder = (input: CreateOrderInput) =>
   post("/orders/", orderSchema, input)
 export const getOrder = (id: string) => get(`/orders/${id}/`, orderSchema)
 export const listOrders = () => get("/orders/", paginated(orderSchema))
+/** A parent asking for money back on some of an order's lines. SchoolShop decides. */
+export const requestRefund = (orderId: string, input: { itemIds: string[]; reason: string }) =>
+  post(`/orders/${orderId}/refund-request/`, orderSchema, input)
 /** M-Pesa sends a prompt to the phone; card returns a redirectUrl to the provider's checkout page. */
 export const startPayment = (orderId: string, input: { method: "mpesa"; phone: string } | { method: "card" }) =>
   post(`/orders/${orderId}/payments/`, paymentSchema, input)
