@@ -10,7 +10,7 @@ import { formatBytes } from "@/lib/format"
  * Files attached to a title. They aren't public, so "Download" fetches each one
  * with the signed-in person's token rather than linking to it.
  */
-export function FileList({ files, onRemove, removingId }: { files: CatalogFile[]; onRemove?: (file: CatalogFile) => void; removingId?: string | null }) {
+export function FileList<F extends Pick<CatalogFile, "id" | "label" | "name" | "sizeBytes">>({ files, onRemove, removingId }: { files: F[]; onRemove?: (file: F) => void; removingId?: string | null }) {
   const [error, setError] = useState<string | null>(null)
   if (files.length === 0) return null
   return (
