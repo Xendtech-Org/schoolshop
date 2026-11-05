@@ -1,5 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
+import { ApiError } from "@/lib/api/client"
 import * as endpoints from "@/lib/api/endpoints"
 import type { Account, AdminMoney, AdminRefunds, SettingsSection, AdminOrder, AdminOrg, CollectionRow, PublisherSettings, SchoolSettings, StaffDirectory } from "@/lib/api/schemas"
 import { useAuthStore } from "@/stores/auth"
@@ -405,6 +406,28 @@ export const useCatalogUploads = () => {
     }),
     removeFile: useMutation({ mutationFn: ({ id, fileId }: { id: string; fileId: string }) => endpoints.removeCatalogFile(id, fileId), onSuccess: refresh }),
   }
+}
+
+/** Covers for many products, one at a time. A photo that's refused doesn't stop the rest; the catalog refreshes once at the end. */
+export const useBulkCoverUpload = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ jobs, onProgress, shouldStop }: { jobs: { id: string; file: File }[]; onProgress: (done: number) => void; shouldStop: () => boolean }) => {
+      const failed: { name: string; reason: string }[] = []
+      let done = 0
+      for (const { id, file } of jobs) {
+        if (shouldStop()) break
+        try {
+          await endpoints.uploadCover(id, file)
+        } catch (e) {
+          failed.push({ name: file.name, reason: e instanceof ApiError ? (e.fieldErrors.file?.[0] ?? e.message) : "It didn't upload. Try this one again." })
+        }
+        onProgress(++done)
+      }
+      return { uploaded: done - failed.length, failed, stopped: jobs.length - done }
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: queryKeys.catalog }),
+  })
 }
 
 export const useDeleteCatalogItems = () => {

@@ -5,6 +5,7 @@ import { Dialog } from "radix-ui"
 import { AlertTriangle, Pencil, Plus, Search, Send, Trash2, Upload, X } from "lucide-react"
 import { z } from "zod"
 
+import { BulkCoverUpload } from "@/components/catalog/BulkCoverUpload"
 import { TitleUploads } from "@/components/catalog/TitleUploads"
 import { PageHeader } from "@/components/common/PageHeader"
 import { QueryBoundary } from "@/components/common/QueryBoundary"
@@ -140,6 +141,7 @@ function Catalog({ items }: { items: CatalogItem[] }) {
         actions={
           <>
             <PriceListUpload />
+            <BulkCoverUpload items={items} />
             <Button onClick={() => setEditing("new")}>
               <Plus aria-hidden /> Add product
             </Button>
