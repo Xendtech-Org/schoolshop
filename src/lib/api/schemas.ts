@@ -985,3 +985,8 @@ export const paginated = <T extends z.ZodType>(item: T) =>
     previous: z.string().nullable(),
     results: z.array(item),
   })
+
+export const productListSchema = paginated(productSchema).extend({
+  subjects: z.array(z.string()),
+  publishers: z.array(z.string()),
+})

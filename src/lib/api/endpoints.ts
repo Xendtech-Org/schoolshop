@@ -30,10 +30,10 @@ import {
   paymentSchema,
   paymentOptionsSchema,
   payoutAccountSchema,
+  productListSchema,
   publisherPayoutsSchema,
   publisherSettingsSchema,
   productDetailSchema,
-  productSchema,
   remindResultSchema,
   collectionRowSchema,
   schoolBatchSchema,
@@ -133,7 +133,7 @@ export const getSchool = (slug: string) => get(`/schools/${slug}/`, schoolSchema
 export const listSchoolBooklists = (slug: string) =>
   get(`/schools/${slug}/booklists/`, z.array(booklistSchema))
 export const listProducts = (filters: Record<string, string> = {}) =>
-  get("/products/", paginated(productSchema), filters)
+  get("/products/", productListSchema, filters)
 export const getProduct = (id: string) => get(`/products/${id}/`, productDetailSchema)
 
 // Parent

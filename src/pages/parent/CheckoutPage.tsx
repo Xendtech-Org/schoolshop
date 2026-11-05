@@ -8,7 +8,7 @@ import { SectionLabel } from "@/components/common/SectionLabel"
 import { ParentPageHeader } from "@/components/layout/ParentLayout"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
-import { useBooklist, useChildren, useCreateOrder, useProducts, useStartPayment } from "@/lib/api/queries"
+import { useBooklist, useChildren, useCreateOrder, useProductsByIds, useStartPayment } from "@/lib/api/queries"
 import type { Booklist, Product } from "@/lib/api/schemas"
 import { formatDay, formatKes } from "@/lib/format"
 import { useAuthStore } from "@/stores/auth"
@@ -42,7 +42,7 @@ function Checkout({ list }: { list: Booklist }) {
   const user = useAuthStore((s) => s.user)
   const cart = useCartStore()
   const children = useChildren()
-  const products = useProducts()
+  const products = useProductsByIds(Object.keys(cart.extras))
   const createOrder = useCreateOrder()
   const startPayment = useStartPayment()
 
@@ -50,9 +50,12 @@ function Checkout({ list }: { list: Booklist }) {
   const listLines = list.items.filter((i) => !cart.excludedItemIds.includes(i.id))
   const listTotal = listLines.reduce((s, i) => s + i.unitPriceCents * i.qtyPerStudent, 0)
   const extras = Object.entries(cart.extras).flatMap(([id, qty]) => {
-    const p = products.data?.results.find((x) => x.id === id)
+    const p = products.data.find((x) => x.id === id)
     return p ? [{ product: p, qty }] : []
   })
+  const unavailableExtraIds = !products.isPending
+    ? Object.keys(cart.extras).filter((id) => !products.data.some((product) => product.id === id))
+    : []
   const extrasTotal = extras.reduce((s, e) => s + e.product.priceCents * e.qty, 0)
   const total = listTotal + extrasTotal
 
@@ -106,6 +109,20 @@ function Checkout({ list }: { list: Booklist }) {
             ))}
           </section>
         )}
+        {unavailableExtraIds.length > 0 && (
+          <div role="alert" className="text-sm text-destructive">
+            <p>Some extra shop items could not be loaded. Remove them to continue:</p>
+            <ul className="mt-1 flex flex-wrap gap-x-3">
+              {unavailableExtraIds.map((id) => (
+                <li key={id}>
+                  <Button type="button" variant="link" className="h-auto p-0 text-destructive" onClick={() => cart.setExtraQty(id, 0)}>
+                    Remove unavailable item
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <section aria-label="Delivery" className="flex items-start gap-3 rounded-2xl border bg-card p-4">
           <School className="mt-0.5 size-5.5 shrink-0" aria-hidden />
@@ -133,7 +150,7 @@ function Checkout({ list }: { list: Booklist }) {
         <PayOptions
           amountCents={total}
           defaultPhone={user?.phone ? user.phone.replace(/^254/, "0") : ""}
-          disabled={createOrder.isPending || listLines.length + extras.length === 0}
+          disabled={createOrder.isPending || products.isPending || products.isError || extras.length !== Object.keys(cart.extras).length || listLines.length + extras.length === 0}
           onMpesa={(phone) => pay({ method: "mpesa", phone })}
           onCard={() => pay({ method: "card" })}
         />

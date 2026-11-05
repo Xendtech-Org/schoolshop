@@ -916,6 +916,7 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     return [...booklists.values()].filter((b) => b.schoolId === school.id && b.status === "published")
   }],
   ["get", "/products/", ({ query }) => {
+    const pageSize = 24
     let results = [...db.products]
     if (query.gradeBand && query.gradeBand !== "all") results = results.filter((p) => p.gradeBand === query.gradeBand || p.gradeBand === "all")
     if (query.category && query.category !== "all") results = results.filter((p) => p.category === query.category || (query.category === "textbook" && !p.category && p.gradeBand !== "all"))
@@ -929,7 +930,27 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     else if (query.sort === "price_desc") results.sort((a, b) => b.priceCents - a.priceCents)
     else if (query.sort === "title") results.sort((a, b) => a.title.localeCompare(b.title))
     else results.sort((a, b) => b.schoolListCount - a.schoolListCount)
-    return { count: results.length, next: null, previous: null, results }
+    const subjects = [...new Set(results.map((p) => p.subject))].sort()
+    const publishers = [...new Set(results.map((p) => p.publisherName))].sort()
+    const count = results.length
+    const totalPages = Math.max(1, Math.ceil(count / pageSize))
+    const parsedPage = Number(query.page ?? "1")
+    const page = Number.isInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1
+    if (page > totalPages) throw new HttpError(404, { detail: "Invalid page." })
+    const paginationUrl = (pageNumber: number) => {
+      const params = new URLSearchParams(query)
+      if (pageNumber === 1) params.delete("page")
+      else params.set("page", String(pageNumber))
+      return `/products/?${params.toString()}`
+    }
+    return {
+      count,
+      next: page < totalPages ? paginationUrl(page + 1) : null,
+      previous: page > 1 ? paginationUrl(page - 1) : null,
+      results: results.slice((page - 1) * pageSize, page * pageSize),
+      subjects,
+      publishers,
+    }
   }],
   ["get", "/products/:id/", ({ params }) => db.productDetail(db.products.find((p) => p.id === params.id) ?? raise(notFound()))],
 

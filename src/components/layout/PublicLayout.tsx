@@ -175,6 +175,7 @@ function HeaderSearchInput({
   const [value, setValue] = useState(current)
   const navigateToSearch = useCallback((text: string, replace: boolean) => {
     const next = new URLSearchParams(pathname === "/shop" ? searchParams : undefined)
+    next.delete("page")
     if (text) next.set("search", text)
     else next.delete("search")
     const qs = next.toString()

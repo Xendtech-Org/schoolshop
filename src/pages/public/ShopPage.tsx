@@ -1,5 +1,5 @@
 import { Link, useSearchParams } from "react-router"
-import { BookOpen, GraduationCap, Library, PencilRuler, School } from "lucide-react"
+import { BookOpen, ChevronLeft, ChevronRight, GraduationCap, Library, PencilRuler, School } from "lucide-react"
 
 import { ProductCard } from "@/components/common/ProductCard"
 import { QueryBoundary } from "@/components/common/QueryBoundary"
@@ -35,6 +35,7 @@ const titles: Record<string, string> = {
   stationery: "Stationery & Supplies",
   textbook: "Textbooks & Readers",
 }
+const PRODUCTS_PER_PAGE = 24
 
 export function ShopPage() {
   const [params, setParams] = useSearchParams()
@@ -47,6 +48,8 @@ export function ShopPage() {
   const publisher = params.get("publisher") ?? ""
   const department = params.get("department") ?? ""
   const sort = params.get("sort") ?? "popular"
+  const parsedPage = Number(params.get("page") ?? "1")
+  const page = Number.isInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1
   const productsFilters: ProductFilters = {
     ...(view === "grade" && grade !== "all" ? { gradeBand: grade } : {}),
     ...(category !== "all" ? { category } : {}),
@@ -56,6 +59,7 @@ export function ShopPage() {
     ...(publisher ? { publisher } : {}),
     ...(department ? { department } : {}),
     ...(sort ? { sort } : {}),
+    ...(page > 1 ? { page: String(page) } : {}),
   }
   const products = useProducts(productsFilters)
   const extras = useCartStore((s) => s.extras)
@@ -64,6 +68,13 @@ export function ShopPage() {
     const next = new URLSearchParams(params)
     if (!value || value === "all") next.delete(key)
     else next.set(key, value)
+    if (key !== "page") next.delete("page")
+    setParams(next)
+  }
+  const setPage = (nextPage: number) => {
+    const next = new URLSearchParams(params)
+    if (nextPage > 1) next.set("page", String(nextPage))
+    else next.delete("page")
     setParams(next)
   }
   const title = view === "curriculum" ? `${curriculum.toUpperCase()} curriculum` : (category !== "all" ? (titles[category] ?? titles.all) : (titles[view] ?? titles.all))
@@ -131,11 +142,11 @@ export function ShopPage() {
           <div className="flex flex-col gap-2 lg:mt-1 lg:border-t lg:pt-4">
             <NativeSelect className="h-10 text-sm" aria-label="Filter by subject" value={subject} onChange={(e) => update("subject", e.target.value)}>
               <option value="">All subjects</option>
-              {Array.from(new Set(products.data?.results.map((p) => p.subject) ?? [])).sort().map((name) => <option key={name} value={name}>{name}</option>)}
+              {(products.data?.subjects ?? []).map((name) => <option key={name} value={name}>{name}</option>)}
             </NativeSelect>
             <NativeSelect className="h-10 text-sm" aria-label="Filter by publisher" value={publisher} onChange={(e) => update("publisher", e.target.value)}>
               <option value="">All publishers</option>
-              {Array.from(new Set(products.data?.results.map((p) => p.publisherName) ?? [])).sort().map((name) => <option key={name} value={name}>{name}</option>)}
+              {(products.data?.publishers ?? []).map((name) => <option key={name} value={name}>{name}</option>)}
             </NativeSelect>
             <NativeSelect className="h-10 text-sm" aria-label="Sort products" value={sort} onChange={(e) => update("sort", e.target.value)}>
               <option value="popular">Most popular</option>
@@ -155,8 +166,12 @@ export function ShopPage() {
             {(data) => (
               <>
                 <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm text-muted-foreground">{data.count} {data.count === 1 ? "product" : "products"}</p>
-                  {(search || subject || publisher || params.get("department")) && <Button variant="ghost" size="sm" onClick={() => setParams(new URLSearchParams([...params].filter(([key]) => !["search", "subject", "publisher", "department"].includes(key))))}>Clear filters</Button>}
+                  <p className="text-sm text-muted-foreground">
+                    {data.count
+                      ? `Showing ${(page - 1) * PRODUCTS_PER_PAGE + 1}–${(page - 1) * PRODUCTS_PER_PAGE + data.results.length} of ${data.count} products`
+                      : "0 products"}
+                  </p>
+                  {(search || subject || publisher || params.get("department")) && <Button variant="ghost" size="sm" onClick={() => setParams(new URLSearchParams([...params].filter(([key]) => !["search", "subject", "publisher", "department", "page"].includes(key))))}>Clear filters</Button>}
                 </div>
                 {data.results.length ? (
                   <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 sm:gap-x-5 xl:grid-cols-4">
@@ -173,11 +188,51 @@ export function ShopPage() {
                     <Button variant="outline" onClick={() => setParams(view === "curriculum" ? { view, curriculum } : view === "grade" ? { view } : {})}>Reset filters</Button>
                   </div>
                 )}
+                {data.count > PRODUCTS_PER_PAGE && (
+                  <ProductPagination count={data.count} page={page} onPageChange={setPage} />
+                )}
               </>
             )}
           </QueryBoundary>
         </section>
       </div>
     </div>
+  )
+}
+
+function ProductPagination({ count, page, onPageChange }: { count: number; page: number; onPageChange: (page: number) => void }) {
+  const totalPages = Math.ceil(count / PRODUCTS_PER_PAGE)
+  const visiblePages = [...new Set([1, page - 1, page, page + 1, totalPages].filter((n) => n >= 1 && n <= totalPages))].sort((a, b) => a - b)
+  const items: (number | "ellipsis")[] = []
+  visiblePages.forEach((n, i) => {
+    if (i > 0 && n - visiblePages[i - 1] > 1) items.push("ellipsis")
+    items.push(n)
+  })
+
+  return (
+    <nav aria-label="Product catalog pages" className="flex flex-wrap items-center justify-center gap-1 pt-2">
+      <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
+        <ChevronLeft aria-hidden /> Previous
+      </Button>
+      {items.map((item, index) =>
+        item === "ellipsis" ? (
+          <span key={`ellipsis-${index}`} aria-hidden className="px-2 text-muted-foreground">…</span>
+        ) : (
+          <Button
+            key={item}
+            variant={item === page ? "secondary" : "ghost"}
+            size="sm"
+            aria-label={`Page ${item}`}
+            aria-current={item === page ? "page" : undefined}
+            onClick={() => onPageChange(item)}
+          >
+            {item}
+          </Button>
+        )
+      )}
+      <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>
+        Next <ChevronRight aria-hidden />
+      </Button>
+    </nav>
   )
 }

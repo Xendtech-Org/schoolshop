@@ -8,7 +8,7 @@ import { ParentPageHeader } from "@/components/layout/ParentLayout"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { useBooklist, useChildren, useProducts } from "@/lib/api/queries"
+import { useBooklist, useChildren, useProductsByIds } from "@/lib/api/queries"
 import type { Booklist, BooklistItem, Child } from "@/lib/api/schemas"
 import { daysUntil, formatDay, formatKes } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -38,7 +38,7 @@ export function BooklistPage() {
 
 function ListView({ list, child }: { list: Booklist; child: Child | undefined }) {
   const { excludedItemIds, toggleItem, extras } = useCartStore()
-  const products = useProducts()
+  const products = useProductsByIds(Object.keys(extras))
   const name = child?.name ?? "your child"
 
   const isOn = (i: BooklistItem) => !excludedItemIds.includes(i.id)
@@ -49,7 +49,7 @@ function ListView({ list, child }: { list: Booklist; child: Child | undefined })
   const requiredTotal = requiredOn.reduce((s, i) => s + lineTotal(i), 0)
   const optionalTotal = optionalOn.reduce((s, i) => s + lineTotal(i), 0)
   const shopLines = Object.entries(extras).flatMap(([id, qty]) => {
-    const p = products.data?.results.find((x) => x.id === id)
+    const p = products.data.find((x) => x.id === id)
     return p ? [{ product: p, qty }] : []
   })
   const shopTotal = shopLines.reduce((s, l) => s + l.product.priceCents * l.qty, 0)
@@ -150,9 +150,13 @@ function ListView({ list, child }: { list: Booklist; child: Child | undefined })
           {closed ? (
             <Button size="lg" disabled>Ordering closed {formatDay(list.orderDeadline)}</Button>
           ) : chosen ? (
-            <Button asChild size="lg">
-              <Link to="/parent/checkout">Continue to checkout</Link>
-            </Button>
+            products.isError ? (
+              <p role="alert" className="text-sm text-destructive">Couldn't load your extra products. Refresh and try again.</p>
+            ) : (
+              <Button asChild size="lg" disabled={products.isPending || shopLines.length !== Object.keys(extras).length}>
+                <Link to="/parent/checkout">Continue to checkout</Link>
+              </Button>
+            )
           ) : (
             <Button size="lg" disabled>Choose at least one item</Button>
           )}

@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import * as endpoints from "@/lib/api/endpoints"
 import type { Account, AdminMoney, AdminRefunds, SettingsSection, AdminOrder, AdminOrg, CollectionRow, PublisherSettings, SchoolSettings, StaffDirectory } from "@/lib/api/schemas"
@@ -69,6 +69,7 @@ export type ProductFilters = {
   subject?: string
   publisher?: string
   sort?: string
+  page?: string
 }
 
 export const useProducts = (filters: ProductFilters = {}) => {
@@ -81,6 +82,20 @@ export const useProducts = (filters: ProductFilters = {}) => {
 
 export const useProduct = (id: string) =>
   useQuery({ queryKey: queryKeys.product(id), queryFn: () => endpoints.getProduct(id) })
+
+export const useProductsByIds = (ids: string[]) => {
+  const queries = useQueries({
+    queries: ids.map((id) => ({
+      queryKey: queryKeys.product(id),
+      queryFn: () => endpoints.getProduct(id),
+    })),
+  })
+  return {
+    data: queries.flatMap((query) => query.data ? [query.data] : []),
+    isPending: queries.some((query) => query.isPending),
+    isError: queries.some((query) => query.isError),
+  }
+}
 
 export const useChildren = () =>
   useQuery({ queryKey: queryKeys.children, queryFn: endpoints.listChildren })
