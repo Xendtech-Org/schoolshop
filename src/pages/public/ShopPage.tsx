@@ -78,7 +78,7 @@ export function ShopPage() {
       </header>
 
       <div className="mt-8 flex flex-col gap-8 lg:flex-row lg:gap-8">
-        <aside aria-label="Filters" className="flex w-full shrink-0 flex-col gap-4 lg:w-[250px]">
+        <aside aria-label="Filters" className="flex w-full shrink-0 flex-col gap-4 lg:sticky lg:top-24 lg:-m-1 lg:max-h-[calc(100dvh-7rem)] lg:w-[258px] lg:self-start lg:overflow-y-auto lg:p-1">
           <nav aria-label="Shop categories" className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-1 lg:gap-0.5">
             {shopPaths.map((path) => {
               const Icon = path.icon
