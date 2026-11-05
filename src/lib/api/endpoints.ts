@@ -329,9 +329,17 @@ export const updatePayoutAccount = async (input: PayoutAccountInput) => {
 }
 
 export const getPublisherSettings = () => get("/publisher/settings/", publisherSettingsSchema)
-export type ProfileInput = Pick<PublisherSettings["profile"], "contactName" | "phone" | "email" | "dispatchAddress" | "county">
+/** Once verified, the API keeps the company name, KRA PIN and registration number it already has. */
+export type ProfileInput = Pick<PublisherSettings["profile"], "website" | "about" | "contactName" | "phone" | "email" | "dispatchAddress" | "county"> &
+  Partial<Pick<PublisherSettings["profile"], "companyName" | "kraPin" | "registrationNo">>
 export const updatePublisherProfile = async (input: ProfileInput) => {
   const { data } = await api.patch("/publisher/settings/profile/", input)
+  return publisherSettingsSchema.parse(data)
+}
+/** JPG, PNG or WebP, up to 5 MB. Replaces any earlier logo. */
+export const uploadPublisherLogo = (file: File) => upload("/publisher/settings/logo/", publisherSettingsSchema, { file })
+export const removePublisherLogo = async () => {
+  const { data } = await api.delete("/publisher/settings/logo/")
   return publisherSettingsSchema.parse(data)
 }
 export const updateNotifications = async (input: PublisherSettings["notifications"]) => {

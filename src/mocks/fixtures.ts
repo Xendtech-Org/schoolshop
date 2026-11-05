@@ -676,7 +676,12 @@ export const publisherSettings: PublisherSettings = {
   profile: {
     companyName: "Longhorn Publishers Ltd",
     kraPin: "P051234567X",
+    registrationNo: "",
+    verified: true,
     verifiedAt: "2026-08-14T10:00:00+03:00",
+    logoUrl: null,
+    website: "",
+    about: "",
     contactName: "Peter Kamau",
     phone: "254700000444",
     email: "orders@longhorn.co.ke",

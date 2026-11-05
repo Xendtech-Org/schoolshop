@@ -1566,6 +1566,18 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     Object.assign(settings.profile, body)
     return settings
   }],
+  ["post", "/publisher/settings/logo/", ({ body }) => {
+    const file = body.file as File | undefined
+    if (!file) throw new HttpError(400, { file: ["Choose a file to upload."] })
+    if (!/\.(jpe?g|png|webp)$/i.test(file.name)) throw new HttpError(400, { file: ["Upload a JPG, PNG or WebP image."] })
+    if (file.size > 5 * 1024 * 1024) throw new HttpError(400, { file: ["Keep it under 5 MB."] })
+    settings.profile.logoUrl = URL.createObjectURL(file)
+    return settings
+  }],
+  ["delete", "/publisher/settings/logo/", () => {
+    settings.profile.logoUrl = null
+    return settings
+  }],
   ["put", "/publisher/settings/notifications/", ({ body }) => {
     settings.notifications = body as typeof settings.notifications
     return settings
