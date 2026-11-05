@@ -1,7 +1,7 @@
 import { AxiosError, type AxiosAdapter, type AxiosResponse, type InternalAxiosRequestConfig } from "axios"
 
 import type { PaymentsInput } from "@/lib/api/schemas"
-import type { AdminOrder, AdminOrg, AdminPayout, AdminRefunds, AuditCategory, AuditEntry, CatalogFile, CatalogSubmission, PlatformSettings, Collection, Dispute, RefundRecord, Booklist, CatalogItem, CollectionRow, Order, Payment, PublisherPayouts, SchoolOrderDetail, StudentOrderRow } from "@/lib/api/schemas"
+import type { AdminOrder, AdminOrg, AdminPayout, AdminRefunds, AuditCategory, AuditEntry, CatalogFile, PlatformSettings, Collection, Dispute, RefundRecord, Booklist, CatalogItem, CollectionRow, Order, Payment, PublisherPayouts, SchoolOrderDetail, StudentOrderRow } from "@/lib/api/schemas"
 import { ownerRole, permissionsFor, roleDef, type OrgType } from "@/lib/access"
 import { formatKes, normaliseKenyanPhone } from "@/lib/format"
 import * as db from "@/mocks/fixtures"
@@ -225,15 +225,12 @@ function syncSchoolRow(o: Order) {
 const refundLog: RefundRecord[] = db.refundLogSeed.map((r) => ({ ...r }))
 const actorName = (userId: string | null) => usersById().find((u) => u.id === userId)?.name ?? "SchoolShop"
 
-/** A title the publisher wants schools to see waits for SchoolShop to check it first. */
-function sendForReview(item: CatalogItem) {
-  const at = new Date().toISOString().replace(/\.\d+Z$/, "+00:00")
-  Object.assign(item, { status: "draft", review: { state: "pending", note: null, submittedAt: at } })
-  submissions.set(`sub-${item.id}`, {
-    id: `sub-${item.id}`, catalogId: item.id, publisherId: "pub-longhorn", publisherName: "Longhorn Publishers", kind: "new_title", title: item.title, subject: item.subject, gradeLabel: item.gradeLabel,
-    isbn: item.isbn, format: item.format, priceCents: item.priceCents, previousPriceCents: null, submittedAt: at, status: "pending", note: null,
-    history: [{ id: "sent", at, actor: "Longhorn Publishers", text: "sent a new title" }],
-  })
+/** The automatic checks on publishing: one that fails stops it. */
+function publishProblem(item: Pick<CatalogItem, "isbn" | "id">): string | null {
+  if (!item.isbn) return null
+  if (!isbnValid(item.isbn)) return `Can't publish this yet. ${item.isbn} isn't a valid ISBN-13. The last digit doesn't match.`
+  const clash = [...catalog.values()].find((c) => c.id !== item.id && c.isbn === item.isbn)
+  return clash ? `Can't publish this yet. ${item.isbn} is already used by ${clash.title}.` : null
 }
 
 /** The parent's own order: which lines they can still ask to have refunded (the limit in Fees & settings → Refunds). */
@@ -389,7 +386,7 @@ function logOrg(org: AdminOrg, userId: string | null, text: string) {
   audit(userId, "organisations", text, { label: org.name, href: `/admin/organisations?org=${org.id}` })
 }
 
-/* ── Catalog review: publishers' new titles and price changes wait for a check. ── */
+/* ── Publishers' catalogs ── */
 
 /** Files publishers attached in this session, for downloads. */
 const mockFiles = new Map<string, File>()
@@ -420,67 +417,12 @@ const gradeBandOf = (label: string): CatalogItem["gradeBand"] => {
   const n = Number(label.match(/\d+/)?.[0])
   return !n ? "all" : n <= 3 ? "1-3" : n <= 6 ? "4-6" : "7-9"
 }
-/** "Moran's", but "Longhorn Publishers'". */
-const possessive = (name: string) => (name.endsWith("s") ? `${name}'` : `${name}'s`)
 const isbnValid = (isbn: string) => {
   const d = isbn.replace(/[^\d]/g, "")
   if (d.length !== 13) return false
   const sum = [...d.slice(0, 12)].reduce((t, c, i) => t + Number(c) * (i % 2 ? 3 : 1), 0)
   return (10 - (sum % 10)) % 10 === Number(d[12])
 }
-type SubmissionRecord = Omit<CatalogSubmission, "checks" | "similar" | "coverUrl" | "files"> & { catalogId?: string }
-const submissions = new Map<string, SubmissionRecord>(db.catalogSubmissionSeeds.map((x) => {
-  const at = new Date(Date.now() - x.hoursAgo * 3_600_000).toISOString().replace(/\.\d+Z$/, "+00:00")
-  const decided = x.status && x.status !== "pending"
-  return [x.id, {
-    id: x.id, publisherId: x.publisherId, publisherName: x.publisherName, kind: x.kind, title: x.title, subject: x.subject, gradeLabel: x.gradeLabel, isbn: x.isbn, format: x.format,
-    priceCents: x.price * 100, previousPriceCents: x.previous ? x.previous * 100 : null, submittedAt: at, status: x.status ?? "pending", note: x.note ?? null,
-    history: [
-      ...(decided ? [{ id: "decided", at: new Date(Date.parse(at) + 3 * 3_600_000).toISOString().replace(/\.\d+Z$/, "+00:00"), actor: x.status === "approved" ? "SchoolShop Ops" : "Kevin Mutai", text: x.status === "approved" ? "approved it" : x.status === "rejected" ? `rejected it: "${x.note}"` : `asked for changes: "${x.note}"` }] : []),
-      { id: "sent", at, actor: x.publisherName, text: x.kind === "new_title" ? "sent a new title" : `asked to change the price from ${formatKes((x.previous ?? 0) * 100)} to ${formatKes(x.price * 100)}` },
-    ],
-  }]
-}))
-
-/** The automatic checks: a real ISBN nobody else uses, a price in line with similar titles, a CBC grade. */
-function submissionView(x: SubmissionRecord): CatalogSubmission {
-  const similar = db.products
-    .filter((p) => p.subject.toLowerCase().split(" ")[0] === x.subject.toLowerCase().split(" ")[0] && (gradeBandOf(x.gradeLabel) === "all" || p.gradeBand === gradeBandOf(x.gradeLabel)) && p.title !== x.title)
-    .slice(0, 4)
-    .map((p) => ({ title: p.title, publisherName: p.publisherName, priceCents: p.priceCents }))
-  const checks: CatalogSubmission["checks"] = []
-  if (x.kind === "new_title" || x.isbn) {
-    const others = [
-      ...db.products.filter((p) => p.title !== x.title).map((p) => ({ isbn: db.productExtras[p.id]?.isbn, owner: `${p.publisherName}'s ${p.title}` })),
-      ...[...catalog.values()].filter((c) => c.id !== x.catalogId).map((c) => ({ isbn: c.isbn, owner: `Longhorn's ${c.title}` })),
-    ]
-    const clash = x.isbn ? others.find((o) => o.isbn && o.isbn.replace(/\D/g, "") === x.isbn!.replace(/\D/g, "")) : undefined
-    checks.push(
-      !x.isbn ? { id: "isbn", label: "ISBN", result: x.subject === "Stationery" ? "pass" : "warn", detail: x.subject === "Stationery" ? "Not needed for stationery." : "No ISBN, so schools can't check the edition." }
-      : !isbnValid(x.isbn) ? { id: "isbn", label: "ISBN", result: "fail", detail: `${x.isbn} isn't a valid ISBN-13. The last digit doesn't match.` }
-      : clash ? { id: "isbn", label: "ISBN", result: "fail", detail: `${x.isbn} is already used by ${clash.owner}.` }
-      : { id: "isbn", label: "ISBN", result: "pass", detail: `${x.isbn} is valid and not used by any other title.` },
-    )
-  }
-  if (x.kind === "price_change" && x.previousPriceCents) {
-    const up = (x.priceCents - x.previousPriceCents) / x.previousPriceCents
-    checks.push({ id: "price", label: "Price change", result: up > 0.1 ? "warn" : "pass", detail: `${up >= 0 ? "Up" : "Down"} ${Math.round(Math.abs(up) * 100)}%, from ${formatKes(x.previousPriceCents)}.${up > 0.1 ? " Parents with open orders keep the old price." : ""}` })
-  } else if (similar.length) {
-    const sorted = similar.map((p) => p.priceCents).sort((a, b) => a - b)
-    const median = sorted[Math.floor(sorted.length / 2)]
-    const over = (x.priceCents - median) / median
-    checks.push({ id: "price", label: "Price", result: over > 1 ? "fail" : over > 0.2 ? "warn" : "pass", detail: over > 0.2 ? `${Math.round(over * 100)}% above similar titles (around ${formatKes(median)}).` : `In line with similar titles (around ${formatKes(median)}).` })
-  } else checks.push({ id: "price", label: "Price", result: "pass", detail: "No similar titles on SchoolShop to compare with." })
-  const grade = /^(PP[12]|Grade [1-9])$/.test(x.gradeLabel) || x.gradeLabel === "All grades"
-  checks.push({ id: "grade", label: "CBC grade", result: grade ? "pass" : "warn", detail: x.gradeLabel === "All grades" ? "For every grade, like stationery." : grade ? `${x.gradeLabel} is a CBC grade.` : `"${x.gradeLabel}" isn't a CBC grade. Check where it belongs.` })
-  const org = adminOrgs.get(x.publisherId)
-  checks.push({ id: "publisher", label: "Publisher", result: org?.status === "live" ? "pass" : "fail", detail: org?.status === "live" ? `${x.publisherName} is verified.` : `${x.publisherName} isn't verified or is paused.` })
-  const { catalogId: _c, ...rest } = x
-  const linked = x.catalogId ? catalog.get(x.catalogId) : undefined
-  return { ...rest, checks, similar, coverUrl: linked?.coverUrl ?? null, files: linked?.files ?? [] }
-}
-/* ── Platform settings ── */
-
 const platform = structuredClone(db.platformSettings)
 const settingsUpdated: PlatformSettings["updated"] = {
   commission: { at: "2026-08-01T09:00:00+03:00", by: "SchoolShop Ops" },
@@ -615,7 +557,6 @@ function applySettings(section: string, body: Record<string, unknown>): string[]
   return changes
 }
 
-const submissionList = () => [...submissions.values()].sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)).map(submissionView)
 
 function collectionRow(o: SchoolOrderDetail): CollectionRow {
   const waitingFor = o.shipments.filter((s) => s.status !== "received").map((s) => s.publisherName)
@@ -683,7 +624,6 @@ const guards: Array<[method: string, path: RegExp, orgType: OrgType, permission:
   ["get", /^\/admin\/organisations\//, "platform", "orgs.view"],
   ["post", /^\/admin\/orders\/[^/]+\/(refund|resolve)\/$/, "platform", "refunds.approve"],
   ["get", /^\/admin\/(money|collections|refunds)\//, "platform", "money.view"],
-  ["*", /^\/admin\/catalog\//, "platform", "catalog.review"],
   ["get", /^\/admin\/audit\//, "platform", "audit.view"],
   ["*", /^\/admin\/settings\//, "platform", "settings.fees"],
   ["post", /^\/admin\/(refunds|disputes)\//, "platform", "refunds.approve"],
@@ -1245,41 +1185,6 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     }
     return settingsView()
   }],
-  ["get", "/admin/catalog/", () => submissionList()],
-  ["post", "/admin/catalog/:id/:decision/", ({ params, body, userId }) => {
-    const x = submissions.get(params.id) ?? raise(notFound())
-    if (x.status !== "pending" && x.status !== "changes_requested") throw new HttpError(409, { detail: "This has already been decided." })
-    const note = String(body.note ?? "").trim()
-    const linked = x.catalogId ? catalog.get(x.catalogId) : undefined
-    const target = { label: x.title, href: `/admin/catalog?sub=${x.id}` }
-    let text: string, own: string
-    if (params.decision === "approve") {
-      const fails = submissionView(x).checks.filter((c) => c.result === "fail")
-      if (fails.length) throw new HttpError(400, { detail: `Can't approve with a failed check: ${fails.map((c) => c.label).join(", ")}. Ask for changes instead.` })
-      x.status = "approved"
-      if (x.kind === "new_title") {
-        db.products.push({ id: `prd-${x.id}`, title: x.title, publisherName: x.publisherId === "pub-longhorn" ? "Longhorn" : x.publisherName, subject: x.subject, gradeLabel: x.gradeLabel, gradeBand: gradeBandOf(x.gradeLabel), priceCents: x.priceCents, schoolListCount: 0, category: x.subject === "Stationery" ? "stationery" : "textbook", audience: "school" })
-        if (x.isbn) db.productExtras[`prd-${x.id}`] = { description: "", isbn: x.isbn, pages: null, format: x.format }
-      } else {
-        const product = db.products.find((p) => p.title === x.title)
-        if (product) product.priceCents = x.priceCents
-      }
-      if (linked) Object.assign(linked, { status: "live", review: null })
-      own = x.kind === "new_title" ? `approved it at ${formatKes(x.priceCents)}. Schools can add it to booklists.` : `approved the new price, ${formatKes(x.priceCents)}`
-      text = x.kind === "new_title" ? `approved ${possessive(x.publisherName)} ${x.title} at ${formatKes(x.priceCents)}` : `approved ${x.title} at ${formatKes(x.priceCents)} (was ${formatKes(x.previousPriceCents ?? 0)})`
-    } else if (params.decision === "request-changes" || params.decision === "reject") {
-      if (!note) throw new HttpError(400, { note: ["Tell the publisher what to fix. They see this."] })
-      const changes = params.decision === "request-changes"
-      x.status = changes ? "changes_requested" : "rejected"
-      x.note = note
-      if (linked) linked.review = { state: changes ? "changes_requested" : "rejected", note, submittedAt: linked.review?.submittedAt ?? x.submittedAt }
-      own = changes ? `asked for changes: "${note}"` : `rejected it: "${note}"`
-      text = changes ? `asked ${x.publisherName} to change ${x.title}: "${note}"` : `rejected ${possessive(x.publisherName)} ${x.title}: "${note}"`
-    } else throw notFound()
-    x.history.unshift({ id: `sh-${Date.now()}`, at: new Date().toISOString().replace(/\.\d+Z$/, "+00:00"), actor: actorName(userId), text: own })
-    audit(userId, "catalog", text, target)
-    return submissionList()
-  }],
   ["get", "/admin/audit/", () => auditLog],
   ["get", "/admin/refunds/", () => refundsView()],
   ["post", "/admin/refunds/approve/", ({ body, userId }) => {
@@ -1582,15 +1487,11 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     }
     const items = [...catalog.values()]
     const low = items.filter((c) => c.status === "live" && c.stock <= c.lowStockAt)
-    const changes = items.filter((c) => c.review?.state === "changes_requested").length
-    const inReview = items.filter((c) => c.review?.state === "pending").length
     const day = (iso: string) => new Date(`${iso}T00:00:00+03:00`).toLocaleDateString("en-KE", { weekday: "short", day: "numeric", month: "short" })
     const alerts = [
       ...(ready.length ? [{ id: "pa-1", severity: "high" as const, title: plural(ready.length, "school") + " ready to dispatch", detail: `First due at ${ready[0].schoolName} on ${day(ready[0].dueAtSchool)}`, href: "/publisher/dispatches" }] : []),
-      ...(changes ? [{ id: "pa-2", severity: "medium" as const, title: `${plural(changes, "title")} need changes`, detail: "SchoolShop asked for changes before they go live", href: "/publisher/catalog" }] : []),
       ...(low.length ? [{ id: "pa-3", severity: "medium" as const, title: `${plural(low.length, "title")} low on stock`, detail: low.slice(0, 3).map((c) => c.title).join(", ") + (low.length > 3 ? ` and ${low.length - 3} more` : ""), href: "/publisher/catalog" }] : []),
       ...(payouts.account.status !== "verified" ? [{ id: "pa-4", severity: "info" as const, title: "Payout account waiting for SchoolShop to confirm", detail: "SchoolShop calls you on the number they already have before paying into it", href: "/publisher/payouts" }] : []),
-      ...(inReview ? [{ id: "pa-5", severity: "info" as const, title: `${plural(inReview, "title")} in review`, detail: "SchoolShop checks new titles and price changes, usually within a working day", href: "/publisher/catalog" }] : []),
     ]
     return {
       publisherName: "Longhorn",
@@ -1601,7 +1502,7 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
       commissionRate: payouts.commissionRate,
       batches: { collecting: all.length - live.length, readyToPack: ready.length, dispatched: all.filter((b) => b.status === "dispatched").length, received: all.filter((b) => b.status === "received").length },
       toDispatch: ready.slice(0, 5).map((b) => ({ id: b.id, schoolName: b.schoolName, town: b.town, packs: b.packs, dueAtSchool: b.dueAtSchool })),
-      catalog: { live: items.filter((c) => c.status === "live" && !c.review).length, inReview, changesRequested: changes, lowStock: low.length },
+      catalog: { live: items.filter((c) => c.status === "live").length, lowStock: low.length },
       topTitles: [...titles].map(([title, t]) => ({ title, ...t })).sort((a, b) => b.salesCents - a.salesCents).slice(0, 5),
       alerts,
     }
@@ -1660,7 +1561,6 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     for (const c of found) {
       if (c.schoolListCount > 0) continue
       catalog.delete(c.id)
-      for (const [id, x] of submissions) if (x.catalogId === c.id && (x.status === "pending" || x.status === "changes_requested")) submissions.delete(id)
     }
     return { deleted: found.length - kept.length, kept }
   }],
@@ -1669,10 +1569,11 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     if (!ids.length) throw new HttpError(400, { ids: ["Choose at least one product."] })
     const found = ids.map((id) => catalog.get(id)).filter((c): c is CatalogItem => !!c)
     if (!found.length) throw notFound()
-    // The mock doesn't record which drafts SchoolShop approved, so every draft goes for review.
-    const drafts = found.filter((c) => c.status === "draft" && c.review?.state !== "pending")
-    for (const c of drafts) sendForReview(c)
-    return { published: 0, sentForReview: drafts.length, unchanged: found.length - drafts.length }
+    const drafts = found.filter((c) => c.status === "draft")
+    const blocked = drafts.flatMap((c) => { const reason = publishProblem(c); return reason ? [{ id: c.id, title: c.title, reason }] : [] })
+    const ready = drafts.filter((c) => !blocked.some((b) => b.id === c.id))
+    for (const c of ready) c.status = "live"
+    return { published: ready.length, unchanged: found.length - drafts.length, blocked }
   }],
   ["post", "/publisher/catalog/import/", ({ body }) => {
     const file = body.file as File | undefined
@@ -1702,7 +1603,7 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
       ready.push({
         id: `cat-${++catalogSeq}`, title: at("title"), subject: at("subject") || "General", gradeLabel, gradeBand: gradeBandOf(gradeLabel), isbn: isbn || null,
         format: at("format") || "Paperback, A4", priceCents: Math.round(price * 100), stock: Number(at("stock") || 0), lowStockAt: Number(at("low_stock") || 100),
-        status: "draft", schoolListCount: 0, coverUrl: null, files: [], review: null,
+        status: "draft", schoolListCount: 0, coverUrl: null, files: [],
       })
     })
     if (!ready.length && !errors.length) throw new HttpError(400, { file: ["There are no titles in this file."] })
@@ -1753,8 +1654,11 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
   ["post", "/publisher/catalog/", ({ body }) => {
     const isbn = body.isbn ? String(body.isbn) : null
     if (isbn && [...catalog.values()].some((c) => c.isbn === isbn)) throw new HttpError(400, { isbn: ["A title with this ISBN is already in your catalog."] })
-    const item: CatalogItem = { ...(body as Omit<CatalogItem, "id" | "schoolListCount" | "coverUrl" | "files">), isbn, id: `cat-${++catalogSeq}`, schoolListCount: 0, coverUrl: null, files: [], review: null }
-    if (item.status === "live") sendForReview(item)
+    const item: CatalogItem = { ...(body as Omit<CatalogItem, "id" | "schoolListCount" | "coverUrl" | "files">), isbn, id: `cat-${++catalogSeq}`, schoolListCount: 0, coverUrl: null, files: [] }
+    if (item.status === "live") {
+      const problem = publishProblem(item)
+      if (problem) throw new HttpError(400, { detail: problem })
+    }
     catalog.set(item.id, item)
     return item
   }],
@@ -1762,6 +1666,10 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     const item = catalog.get(params.id) ?? raise(notFound())
     const isbn = "isbn" in body ? (body.isbn ? String(body.isbn) : null) : item.isbn
     if (isbn && [...catalog.values()].some((c) => c.isbn === isbn && c.id !== item.id)) throw new HttpError(400, { isbn: ["Another title already uses this ISBN."] })
+    if (body.status === "live") {
+      const problem = publishProblem({ id: item.id, isbn })
+      if (problem) throw new HttpError(400, { detail: problem })
+    }
     Object.assign(item, body, { isbn })
     return item
   }],
@@ -1777,8 +1685,6 @@ const routes: Array<[method: string, pattern: string, handler: Handler]> = [
     const href = "/admin/orders?show=attention"
     const { requests, disputes: allDisputes } = refundsView()
     const openDisputes = allDisputes.filter((d) => d.status === "open")
-    const toReview = [...submissions.values()].filter((x) => x.status === "pending")
-    if (toReview.length) alerts.unshift({ id: "al-6", severity: "info", title: `${toReview.length} title${toReview.length === 1 ? "" : "s"} to review`, detail: `${new Set(toReview.map((x) => x.publisherName)).size} publishers`, href: "/admin/catalog" })
     if (requests.length) alerts.unshift({ id: "al-5", severity: "info", title: `${requests.length} refund${requests.length === 1 ? "" : "s"} to approve`, detail: `${formatKes(requests.reduce((t, r) => t + r.amountCents, 0))} back to parents`, href: "/admin/refunds" })
     if (openDisputes.length) alerts.unshift({ id: "al-4", severity: "medium", title: `${openDisputes.length} delivery dispute${openDisputes.length === 1 ? "" : "s"}`, detail: openDisputes.map((d) => `${d.schoolName} · ${d.publisherName} · ${d.packs} packs`).join("; "), href: "/admin/refunds?tab=disputes" })
     if (unconfirmed.length) alerts.unshift({ id: "al-3", severity: "medium", title: `${unconfirmed.length} M-Pesa payment${unconfirmed.length === 1 ? "" : "s"} not confirmed`, detail: "No callback after 2 minutes, status check queued", href })

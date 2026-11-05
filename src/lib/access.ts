@@ -47,7 +47,6 @@ export const permissionCatalog: Record<OrgType, PermissionDef[]> = {
     { id: "money.view", label: "See payments, refunds and payouts", group: "Money" },
     { id: "refunds.approve", label: "Approve refunds and settle disputes", group: "Money" },
     { id: "payouts.release", label: "Release publisher payouts", group: "Money" },
-    { id: "catalog.review", label: "Approve titles for the catalog", group: "Catalog" },
     { id: "settings.fees", label: "Change fees and platform settings", group: "Administration" },
     { id: "audit.view", label: "Read the audit log", group: "Administration" },
     { id: "staff.manage", label: "Invite SchoolShop staff and change their roles", group: "Administration" },
@@ -69,7 +68,7 @@ export const roleCatalog: Record<OrgType, RoleDef[]> = {
   ],
   platform: [
     { id: "super_admin", label: "Super admin", description: "Full access, including SchoolShop staff and fees.", permissions: all("platform") },
-    { id: "operations", label: "Operations", description: "Verifies schools and publishers, reviews titles and follows orders.", permissions: ["overview.view", "orgs.view", "orgs.verify", "orders.view", "catalog.review"] },
+    { id: "operations", label: "Operations", description: "Verifies schools and publishers and follows orders.", permissions: ["overview.view", "orgs.view", "orgs.verify", "orders.view"] },
     { id: "finance", label: "Finance", description: "Payments, refunds and publisher payouts.", permissions: ["overview.view", "orders.view", "money.view", "refunds.approve", "payouts.release", "audit.view"] },
     { id: "support", label: "Support", description: "Helps parents and schools: can look things up but not change money or verification.", permissions: ["overview.view", "orgs.view", "orders.view", "money.view"] },
   ],

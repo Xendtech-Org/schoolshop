@@ -28,7 +28,6 @@ export const queryKeys = {
   adminOrders: ["admin-orders"] as const,
   adminMoney: ["admin-money"] as const,
   adminRefunds: ["admin-refunds"] as const,
-  catalogReview: ["admin-catalog"] as const,
   audit: ["admin-audit"] as const,
   platformSettings: ["admin-settings"] as const,
   collections: ["admin-collections"] as const,
@@ -237,20 +236,8 @@ export function useSavePlatformSettings() {
   })
 }
 
-export const useCatalogSubmissions = () => useQuery({ queryKey: queryKeys.catalogReview, queryFn: endpoints.listCatalogSubmissions })
 /** Every admin action writes to the log, so it's fetched fresh each time the page opens. */
 export const useAudit = () => useQuery({ queryKey: queryKeys.audit, queryFn: endpoints.listAudit, refetchOnMount: "always" })
-
-export function useDecideSubmission() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: ({ id, decision, note }: { id: string; decision: endpoints.CatalogDecision; note: string }) => endpoints.decideSubmission(id, decision, note),
-    onSuccess: (list) => {
-      qc.setQueryData(queryKeys.catalogReview, list)
-      return Promise.all([queryKeys.catalog, queryKeys.audit, queryKeys.adminOverview].map((queryKey) => qc.invalidateQueries({ queryKey })))
-    },
-  })
-}
 
 export const useAdminRefunds = () => useQuery({ queryKey: queryKeys.adminRefunds, queryFn: endpoints.getAdminRefunds })
 

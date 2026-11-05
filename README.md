@@ -195,6 +195,7 @@ Please don't reverse these without asking the repo owner.
 | Finance sends publisher payouts by hand and records the reference | SasaPay's payout APIs couldn't be verified, and automatic transfers risk real money |
 | A dispute refunds only the students staff tick | Schools count per class, so refunding a whole short class would over-refund |
 | No commission on refunded money | A deliberate change from the mock |
+| Nobody at SchoolShop approves products | Publish goes live straight away after automatic ISBN and price checks. A product that fails stays unpublished, and the publisher sees why |
 | SMS goes through Onfon | The owner already uses it |
 | No server-side cart or inventory app | The basket lives in the browser, and stock lives on the product |
 

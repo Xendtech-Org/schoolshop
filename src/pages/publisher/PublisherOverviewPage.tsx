@@ -113,8 +113,6 @@ function Overview({ o }: { o: PublisherOverview }) {
             <dl className="grid grid-cols-2 gap-3">
               {[
                 ["Published", o.catalog.live],
-                ["In review", o.catalog.inReview],
-                ["Changes asked for", o.catalog.changesRequested],
                 ["Low on stock", o.catalog.lowStock],
               ].map(([label, n]) => (
                 <div key={label} className="rounded-xl bg-paper p-3">

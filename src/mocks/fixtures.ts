@@ -794,23 +794,6 @@ export const adminOrderExtras: Record<string, AdminOrderExtra> = {}
   }
 }
 
-/*
- * Titles and price changes publishers sent for checking. Longhorn's own new
- * titles join this queue when its team adds them; these are everyone else's.
- */
-type SubmissionSeed = { id: string; publisherId: string; publisherName: string; kind: "new_title" | "price_change"; title: string; subject: string; gradeLabel: string; isbn: string | null; format: string; price: number; previous?: number; hoursAgo: number; status?: "pending" | "changes_requested" | "approved" | "rejected"; note?: string }
-export const catalogSubmissionSeeds: SubmissionSeed[] = [
-  { id: "sub-1", publisherId: "pub-spotlight", publisherName: "Spotlight Publishers", kind: "new_title", title: "Spotlight Mathematics Grade 5", subject: "Mathematics", gradeLabel: "Grade 5", isbn: "978-9966-25-118-3", format: "Paperback, A4 · 192 pages", price: 760, hoursAgo: 30 },
-  { id: "sub-2", publisherId: "pub-moran", publisherName: "Moran", kind: "new_title", title: "Science & Technology Grade 5", subject: "Science", gradeLabel: "Grade 5", isbn: "978-9966-36-655-9", format: "Paperback, A4 · 176 pages", price: 700, hoursAgo: 20 },
-  { id: "sub-3", publisherId: "pub-mentor", publisherName: "Mentor Publishers", kind: "new_title", title: "Kenya Primary Atlas, 2027 edition", subject: "Social Studies", gradeLabel: "Grade 4", isbn: "978-9966-47-305-9", format: "Hardback, A4 · 96 pages", price: 1650, hoursAgo: 9 },
-  { id: "sub-4", publisherId: "pub-kasuku", publisherName: "Kasuku Stationers", kind: "price_change", title: "Exercise books, 96 pages ×10", subject: "Stationery", gradeLabel: "All grades", isbn: null, format: "Pack of 10", price: 520, previous: 450, hoursAgo: 6 },
-  { id: "sub-5", publisherId: "pub-oxford", publisherName: "Oxford University Press East Africa", kind: "new_title", title: "Kiswahili Mufti Grade 5", subject: "Kiswahili", gradeLabel: "Grade 5", isbn: "978-0-19-573904-9", format: "Paperback, A4 · 160 pages", price: 690, hoursAgo: 4 },
-  { id: "sub-6", publisherId: "pub-storymoja", publisherName: "Storymoja", kind: "new_title", title: "Hadithi za Bibi (reader)", subject: "Kiswahili", gradeLabel: "Grade 3", isbn: "978-9966-41-022-1", format: "Paperback, A5 · 48 pages", price: 350, hoursAgo: 2 },
-  { id: "sub-7", publisherId: "pub-klb", publisherName: "Kenya Literature Bureau", kind: "new_title", title: "Social Studies Grade 8", subject: "Social Studies", gradeLabel: "Grade 8", isbn: "978-9966-44-301-4", format: "Paperback, A4 · 220 pages", price: 840, hoursAgo: 52, status: "changes_requested", note: "The cover says Grade 7. Please upload the Grade 8 cover and the KICD approval letter." },
-  { id: "sub-8", publisherId: "pub-spotlight", publisherName: "Spotlight Publishers", kind: "price_change", title: "Spotlight English Grade 4", subject: "English", gradeLabel: "Grade 4", isbn: "978-9966-10-772-5", format: "Paperback, A4", price: 700, previous: 680, hoursAgo: 70, status: "approved" },
-  { id: "sub-9", publisherId: "pub-kasuku", publisherName: "Kasuku Stationers", kind: "new_title", title: "Geometry set (no brand)", subject: "Stationery", gradeLabel: "All grades", isbn: null, format: "Tin, 9 pieces", price: 950, hoursAgo: 96, status: "rejected", note: "KES 950 is more than twice what schools pay elsewhere for the same set." },
-]
-
 /** What SchoolShop staff did before the demo starts. Newer entries are written as people act. */
 export const auditSeeds: { hoursAgo: number; actor: string; role: string; category: AuditCategory; text: string; target: { label: string; href: string } | null }[] = [
   { hoursAgo: 0.6, actor: "Kevin Mutai", role: "Operations", category: "orders", text: "noted on the order: \"Parent called, collecting Friday\"", target: { label: "SS-20418", href: "/admin/orders?show=all&order=ord-20418" } },

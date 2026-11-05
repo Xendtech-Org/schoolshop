@@ -40,15 +40,8 @@ const stateBadge: Record<StockState, { label: string; variant: "success" | "warn
   draft: { label: "Draft", variant: "secondary" },
 }
 
-const reviewBadge = {
-  pending: { label: "In review", variant: "info" },
-  changes_requested: { label: "Changes asked", variant: "warning" },
-  rejected: { label: "Not approved", variant: "destructive" },
-} as const
-
-/** New titles show where they are in SchoolShop's review until they're published. */
-function ItemBadge({ item, st }: { item: CatalogItem; st: StockState }) {
-  const b = item.review ? reviewBadge[item.review.state] : stateBadge[st]
+function ItemBadge({ st }: { st: StockState }) {
+  const b = stateBadge[st]
   return <Badge variant={b.variant}>{b.label}</Badge>
 }
 
@@ -221,7 +214,7 @@ function Catalog({ items }: { items: CatalogItem[] }) {
             <Button
               size="sm"
               disabled={publish.isPending || !chosen.some((i) => i.status === "draft")}
-              onClick={() => publish.mutate(chosen.map((i) => i.id), { onSuccess: (result) => { setPublished(result); setSelected(new Set()) } })}
+              onClick={() => publish.mutate(chosen.map((i) => i.id), { onSuccess: (result) => { setPublished(result); setSelected(new Set(result.blocked.map((b) => b.id))) } })}
             >
               <Send aria-hidden /> {publish.isPending ? "Publishing…" : "Publish"}
             </Button>
@@ -271,7 +264,6 @@ function Catalog({ items }: { items: CatalogItem[] }) {
                             <span className="flex min-w-0 flex-col">
                               <span className="font-semibold">{item.title}</span>
                               <span className="text-[13px] text-muted-foreground">{item.format}</span>
-                              {item.review?.note && <span className="text-[13px] text-warn-fg">SchoolShop: {item.review.note}</span>}
                             </span>
                           </div>
                         </TableCell>
@@ -282,7 +274,7 @@ function Catalog({ items }: { items: CatalogItem[] }) {
                           {item.stock.toLocaleString("en-KE")}
                         </TableCell>
                         <TableCell className="text-right">{item.schoolListCount}</TableCell>
-                        <TableCell><ItemBadge item={item} st={st} /></TableCell>
+                        <TableCell><ItemBadge st={st} /></TableCell>
                         <TableCell className="text-right">
                           <Button variant="ghost" size="sm" onClick={() => setEditing(item)} aria-label={`Edit ${item.title}`}>
                             <Pencil aria-hidden /> Edit
@@ -310,9 +302,8 @@ function Catalog({ items }: { items: CatalogItem[] }) {
                       <span className="flex min-w-0 grow flex-col">
                         <span className="font-semibold">{item.title}</span>
                         <span className="text-[13px] text-muted-foreground">{item.gradeLabel} · {item.format}</span>
-                        {item.review?.note && <span className="text-[13px] text-warn-fg">SchoolShop: {item.review.note}</span>}
                       </span>
-                      <ItemBadge item={item} st={st} />
+                      <ItemBadge st={st} />
                     </div>
                     <dl className="grid grid-cols-3 gap-2 text-sm">
                       <div><dt className="text-muted-foreground">Price</dt><dd className="font-semibold">{formatKes(item.priceCents)}</dd></div>
@@ -426,12 +417,14 @@ function DeleteNotice({ result, onClose }: { result: CatalogDeleteResult; onClos
 function PublishNotice({ result, onClose }: { result: CatalogPublishResult; onClose: () => void }) {
   const parts = [
     result.published > 0 && `Published ${plural(result.published, "product")}.`,
-    result.sentForReview > 0 && `Sent ${plural(result.sentForReview, "new product")} to SchoolShop to check, usually within a working day.`,
-    result.unchanged > 0 && `${plural(result.unchanged, "product")} already published or in review.`,
+    result.unchanged > 0 && `${plural(result.unchanged, "product")} already published.`,
   ].filter(Boolean)
   return (
-    <div role="status" className="flex items-start gap-3 rounded-xl bg-success-bg px-4 py-3 text-sm">
-      <span className="grow font-semibold">{parts.join(" ")}</span>
+    <div role="status" className={cn("flex items-start gap-3 rounded-xl px-4 py-3 text-sm", result.blocked.length ? "bg-warn-bg text-warn-fg" : "bg-success-bg")}>
+      <div className="flex grow flex-col gap-1">
+        {parts.length > 0 && <span className="font-semibold">{parts.join(" ")}</span>}
+        {result.blocked.map((b) => <span key={b.id}>{b.title}: {b.reason}</span>)}
+      </div>
       <Button variant="ghost" size="sm" aria-label="Dismiss" onClick={onClose}><X aria-hidden /></Button>
     </div>
   )
@@ -613,13 +606,13 @@ function TitleForm({ item, onDone, onCreated }: { item: CatalogItem | null; onDo
         {item ? (
           <TitleUploads itemId={item.id} />
         ) : (
-          <p className="text-sm text-muted-foreground">After you add the product you can upload its cover, documents for SchoolShop's review, and digital resources.</p>
+          <p className="text-sm text-muted-foreground">After you save the product you can upload its cover and digital resources.</p>
         )}
         {form.formState.errors.root && (
           <p role="alert" className="text-sm font-medium text-destructive">{form.formState.errors.root.message}</p>
         )}
         <p className="text-sm text-muted-foreground">
-          Publish lets schools find it and add it to booklists. Anything new goes to SchoolShop to check first, usually within a working day. A draft stays hidden from schools and parents.
+          Publish puts it in the shop straight away, and schools can add it to booklists. We check the ISBN and price first. A draft stays hidden from schools and parents.
         </p>
         <div className="sticky bottom-0 -mx-6 mt-2 flex gap-3 border-t bg-surface px-6 py-4">
           <Button type="button" variant="outline" size="lg" className="grow" disabled={save.isPending} onClick={submit("draft")}>
